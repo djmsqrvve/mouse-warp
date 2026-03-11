@@ -1,0 +1,8 @@
+{
+  "uuid": "mouse-warp@djmsqrvve",
+  "name": "Mouse Warp",
+  "description": "Proportional mouse cursor mapping between monitors of different sizes. The Linux answer to LittleBigMouse.",
+  "shell-version": ["47", "48", "49", "50"],
+  "version": 1,
+  "url": "https://github.com/djmsqrvve/mouse-warp"
+}
