@@ -2,15 +2,19 @@
 
 ## Architecture
 
-Single-file GNOME Shell extension (`extension.js`). No build step, no dependencies.
+GNOME Shell extension with the following files:
+- `extension.js` — core logic, system tray toggle, visual feedback
+- `prefs.js` — GTK4/Adwaita preferences window
+- `schemas/` — GSettings XML schema for user configuration
 
 ### Core flow
 
-1. `enable()` → reads monitor layout, connects to stage motion events
+1. `enable()` → loads GSettings, creates system tray indicator, reads monitor layout, connects to stage motion events
 2. `_buildBoundaries()` → groups monitors into horizontal rows by Y, finds adjacent rows with mismatched widths, registers proportional mapping boundaries
-3. `_onMotion()` → on every pointer motion:
+3. `_onMotion()` → on every pointer motion (if `is-enabled` is true):
    - **Overlap crossing**: if cursor changed monitors across a registered boundary, remap x proportionally
-   - **Dead-zone pressure**: if cursor is stuck at a boundary edge (no monitor above/below), count consecutive hits, warp after threshold
+   - **Dead-zone pressure**: if cursor is stuck at a boundary edge (no monitor above/below), start a timer and warp after the configurable time threshold
+4. `_showVisualFeedback()` → draws a glowing circle at the warp destination that fades out over 300ms
 
 ### Key APIs
 
@@ -32,7 +36,24 @@ Monitor layout used during development:
 - DP-3 (second): 2560x1440 @ +0+1080
 - HDMI-1 (TV): 1920x1080 @ +1600+0
 
-### Quick test cycle
+### Automated tests (154 assertions)
+
+Run locally with Node.js:
+```bash
+bash tests/run_tests.sh
+```
+
+Or via Docker (also validates schema compilation with glib):
+```bash
+docker compose run tests
+```
+
+Tests cover: schema validation, boundary building, proportional warp math, time-based pressure,
+enable/disable lifecycle, tray toggle, visual feedback, settings sync, and file structure.
+
+CI runs automatically on push/PR via GitHub Actions (`.github/workflows/test.yml`).
+
+### Quick manual test cycle
 
 ```bash
 make install
@@ -57,8 +78,8 @@ journalctl -f --grep="mouse-warp" _COMM=gnome-shell
 
 - [ ] Only handles horizontal boundaries (top/bottom). Left/right side-by-side monitors with height mismatches are not handled yet.
 - [ ] Overlap-zone remapping may feel surprising if the smaller monitor is physically centered — the proportional remap shifts x away from 1:1. Could add a config option to disable overlap remapping and only fix dead zones.
-- [ ] Pressure threshold (5 events) is hardcoded. May need tuning for different mouse polling rates.
-- [ ] No preferences UI yet. Could add GSettings schema for threshold, enable/disable per-boundary, etc.
+- [x] ~~Pressure threshold (5 events) is hardcoded.~~ Now configurable via GSettings (`pressure-threshold-ms`) and uses time-based measurement.
+- [x] ~~No preferences UI yet.~~ Preferences window with GTK4/Adwaita + system tray toggle added.
 - [ ] Not tested with fractional scaling — `monitors` coordinates may be logical, which should be fine, but needs verification.
 - [ ] Not tested with more than 3 monitors or non-rectangular layouts.
 - [ ] Consider publishing to extensions.gnome.org once stable (`make package` creates the zip).

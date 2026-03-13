@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.mouse-warp" path="/org/gnome/shell/extensions/mouse-warp/">
+    <key name="edge-tolerance" type="i">
+      <default>2</default>
+      <summary>Edge Tolerance</summary>
+      <description>The distance in pixels from the screen edge that triggers the warp.</description>
+    </key>
+    <key name="pressure-threshold-ms" type="i">
+      <default>150</default>
+      <summary>Pressure Threshold (ms)</summary>
+      <description>The time in milliseconds the cursor must press against the edge before warping.</description>
+    </key>
+    <key name="is-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Extension</summary>
+      <description>Whether the mouse warp functionality is currently active.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,32 @@
+name: Mouse Warp Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install glib tools
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev
+
+      - name: Run schema validation tests
+        run: node tests/test_schema.js
+
+      - name: Run extension logic tests
+        run: node tests/test_extension_logic.js
+
+      - name: Run metadata & structure tests
+        run: node tests/test_metadata.js
+
+      - name: Compile GSettings schema (strict)
+        run: glib-compile-schemas --strict schemas/

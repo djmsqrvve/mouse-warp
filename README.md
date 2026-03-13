@@ -56,7 +56,32 @@ make uninstall
    - If the cursor is stuck in a dead zone at a boundary → count pressure, then warp after a threshold.
 4. On monitor hot-plug (`monitors-changed`), boundaries are recalculated automatically.
 
-No configuration needed — it auto-detects your layout.
+No configuration needed for layout detection — it auto-detects your layout.
+
+## Configuration
+
+This extension comes with a preferences window and a system tray toggle to customize your experience:
+
+- **Settings Menu**: Adjust the 'Edge Tolerance' and 'Pressure Threshold (ms)' to fine-tune the warping sensitivity.
+- **System Tray**: A quick toggle is available from the GNOME system tray status area (look for the mouse icon), letting you enable or disable the warp functionality instantly.
+- **Time-Based Physics Engine**: The dead-zone physics engine uses a time-based approach for smooth and hardware-agnostic warping, independent of your monitor's refresh rate.
+- **Visual Feedback**: The warped pointer leaves a temporary glowing visual ripple so you never lose track of your cursor when traversing massive screen expanses.
+
+## Testing
+
+Run the full test suite (154 assertions) locally:
+
+```bash
+bash tests/run_tests.sh
+```
+
+Or via Docker (includes GSettings schema compilation validation):
+
+```bash
+docker compose run tests
+```
+
+CI runs automatically on push/PR via GitHub Actions.
 
 ## Compatibility
 

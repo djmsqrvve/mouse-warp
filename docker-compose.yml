@@ -1,0 +1,6 @@
+services:
+  tests:
+    build: .
+    volumes:
+      - .:/app
+    command: bash tests/run_tests.sh
