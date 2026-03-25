@@ -172,23 +172,15 @@ class TestableMouseWarp {
 
     enable() {
         this._settings = this.getSettings();
-        this._edgeTolerance = this._settings.get_int('edge-tolerance');
-        this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
-        this._isEnabled = this._settings.get_boolean('is-enabled');
+        this._loadSettings();
 
         this._settingsChangedId = this._settings.connect('changed', () => {
-            this._edgeTolerance = this._settings.get_int('edge-tolerance');
-            this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
-            this._isEnabled = this._settings.get_boolean('is-enabled');
-            if (!this._isEnabled)
-                this._resetMotionState();
-            this._updateTrayToggle();
+            this._loadSettings();
         });
-
-        this._createTrayIcon();
 
         this._resetMotionState();
         this._boundaries = [];
+        this._feedbackWidgets = [];
         this._buildBoundaries();
 
         this._stageEventId = mockGlobal.stage.connect('captured-event', (_, event) => {
@@ -202,27 +194,12 @@ class TestableMouseWarp {
         );
     }
 
-    _createTrayIcon() {
-        this._indicator = new mockPanelMenu.Button(0.0, 'Mouse Warp Indicator', false);
-        let icon = new mockSt.Icon({
-            icon_name: 'input-mouse-symbolic',
-            style_class: 'system-status-icon',
-        });
-        this._indicator.add_child(icon);
-
-        this._toggleSwitch = new mockPopupMenu.PopupSwitchMenuItem('Enable Mouse Warp', this._isEnabled);
-        this._toggleSwitch.connect('toggled', (item, state) => {
-            this._settings.set_boolean('is-enabled', state);
-        });
-
-        this._indicator.menu.addMenuItem(this._toggleSwitch);
-        mockMain.panel.addToStatusArea('mouse-warp-indicator', this._indicator);
-    }
-
-    _updateTrayToggle() {
-        if (this._toggleSwitch) {
-            this._toggleSwitch.setToggleState(this._isEnabled);
-        }
+    _loadSettings() {
+        this._edgeTolerance = this._settings.get_int('edge-tolerance');
+        this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
+        this._isEnabled = this._settings.get_boolean('is-enabled');
+        if (!this._isEnabled)
+            this._resetMotionState();
     }
 
     _resetMotionState() {
@@ -234,10 +211,11 @@ class TestableMouseWarp {
     disable() {
         this._resetMotionState();
 
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
+        for (const w of this._feedbackWidgets) {
+            try { w.destroy(); } catch (_) {}
         }
+        this._feedbackWidgets = [];
+
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
@@ -664,9 +642,8 @@ setupDualRowMonitors();
     ext.enable();
 
     assert(ext._settings !== null, 'Settings loaded on enable');
-    assert(ext._indicator !== null, 'Tray indicator created on enable');
-    assert(indicatorCreated, 'PanelMenu.Button was instantiated');
     assert(ext._boundaries.length > 0, 'Boundaries built on enable');
+    assert(Array.isArray(ext._feedbackWidgets), 'Feedback widgets array initialized');
     assertEqual(ext._edgeTolerance, 2, 'edgeTolerance loaded from settings default (2)');
     assertEqual(ext._pressureThresholdMs, 150, 'pressureThresholdMs loaded from settings default (150)');
     assertEqual(ext._isEnabled, true, 'isEnabled loaded from settings default (true)');
@@ -676,17 +653,16 @@ setupDualRowMonitors();
     ext._lastMonitorIndex = 1;
     ext.disable();
     assert(ext._settings === null, 'Settings nulled on disable');
-    assert(ext._indicator === null, 'Indicator nulled on disable');
-    assert(indicatorDestroyed, 'Indicator.destroy() called on disable');
+    assertEqual(ext._feedbackWidgets.length, 0, 'Feedback widgets cleaned up on disable');
     assertEqual(ext._boundaries.length, 0, 'Boundaries cleared on disable');
     assertEqual(ext._skipWarpEvent, false, 'skipWarpEvent cleared on disable');
     assertEqual(ext._pressureStartTime, 0, 'Pressure timer cleared on disable');
     assertEqual(ext._lastMonitorIndex, -1, 'lastMonitorIndex reset on disable');
 }
 
-// ── 8. Tray Toggle ──────────────────────────────────────────────────
+// ── 8. Settings Toggle ──────────────────────────────────────────────
 
-console.log('\n── 8. Tray Toggle ──');
+console.log('\n── 8. Settings Toggle ──');
 
 resetMocks();
 setupDualRowMonitors();
@@ -694,17 +670,21 @@ setupDualRowMonitors();
     const ext = new TestableMouseWarp();
     ext.enable();
 
-    assertEqual(toggleSwitchState, true, 'Toggle switch initialized to true');
+    assertEqual(ext._isEnabled, true, 'Extension starts enabled');
 
     // Simulate settings change to disabled
     settingsStore['is-enabled'] = false;
-    // Trigger the settings changed callback
     for (const cb of Object.values(settingsListeners)) {
         cb();
     }
-    // The _updateTrayToggle should sync the switch
     assertEqual(ext._isEnabled, false, 'isEnabled updated after settings change');
-    assertEqual(toggleSwitchState, false, 'Toggle switch updated to false after settings change');
+
+    // Re-enable
+    settingsStore['is-enabled'] = true;
+    for (const cb of Object.values(settingsListeners)) {
+        cb();
+    }
+    assertEqual(ext._isEnabled, true, 'isEnabled restored after re-enable');
 
     ext.disable();
 }

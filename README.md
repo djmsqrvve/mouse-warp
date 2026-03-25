@@ -80,10 +80,32 @@ No configuration needed for layout detection — it auto-detects your layout.
 
 This extension comes with a preferences window and a system tray toggle to customize your experience:
 
-- **Settings Menu**: Adjust the 'Edge Tolerance' and 'Pressure Threshold (ms)' to fine-tune the warping sensitivity.
-- **System Tray**: A quick toggle is available from the GNOME system tray status area (look for the mouse icon), letting you enable or disable the warp functionality instantly.
+- **Settings Menu**: Adjust the 'Edge Tolerance' and 'Pressure Threshold (ms)' to fine-tune the warping sensitivity via `gnome-extensions prefs mouse-warp@djmsqrvve`.
+- **Enable/Disable**: Use `dj mouse warp on/off` or toggle via GSettings (`is-enabled`).
 - **Time-Based Physics Engine**: The dead-zone physics engine uses a time-based approach for smooth and hardware-agnostic warping, independent of your monitor's refresh rate.
 - **Visual Feedback**: The warped pointer leaves a temporary glowing visual ripple so you never lose track of your cursor when traversing massive screen expanses.
+
+## Visualizer
+
+An interactive HTML tool shows the monitor layout, dead zones, warp mapping lines, and proportional formula — live as you move your mouse.
+
+```bash
+dj mouse warp visualize   # Opens in browser
+# Or open directly: mouse-warp/visualizer.html
+```
+
+Toggle between "Current Layout" and "Fixed Layout" to compare the TV centered vs. flush-left positioning.
+
+## CLI Integration
+
+```bash
+dj mouse warp on          # Enable extension
+dj mouse warp off         # Disable extension
+dj mouse warp status      # Show extension state
+dj mouse warp visualize   # Open interactive visualizer
+dj mouse status           # Full mouse config + warp state
+dj video layout 3         # Apply flush-left TV layout for mouse-warp
+```
 
 ## Testing
 

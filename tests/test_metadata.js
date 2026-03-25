@@ -142,11 +142,10 @@ assert(ext.includes('get_monotonic_time'), 'Uses GLib.get_monotonic_time() for t
 assert(ext.includes('_pressureStartTime'), 'Uses _pressureStartTime field');
 assert(!ext.includes('_edgePressure++'), 'No frame-based _edgePressure++ counter');
 
-// System tray
-assert(ext.includes('PanelMenu'), 'Imports PanelMenu for tray indicator');
-assert(ext.includes('PopupMenu'), 'Imports PopupMenu for toggle');
-assert(ext.includes('addToStatusArea'), 'Adds indicator to status area');
-assert(ext.includes('input-mouse-symbolic'), 'Uses mouse icon for tray');
+// Error handling (tray icon removed for stability — crash-prone on some GNOME versions)
+assert(ext.includes('try'), 'Has try/catch error handling');
+assert(ext.includes('catch'), 'Has catch blocks for crash prevention');
+assert(ext.includes('log('), 'Logs errors instead of crashing');
 
 // Visual feedback
 assert(ext.includes('_showVisualFeedback'), 'Has _showVisualFeedback method');
