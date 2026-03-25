@@ -34,7 +34,7 @@ Tested on: GNOME Shell 50.beta, Wayland, Nvidia (RTX 2080 Ti).
 Monitor layout used during development:
 - DP-1 (main): 2560x1440 @ +2560+1080
 - DP-3 (second): 2560x1440 @ +0+1080
-- HDMI-1 (TV): 1920x1080 @ +1600+0
+- HDMI-1 (TV): 1920x1080 @ +0+0 (flush-left, managed by `dj display 3`)
 
 ### Automated tests (154 assertions)
 

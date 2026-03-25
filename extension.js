@@ -21,8 +21,6 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
-import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import St from 'gi://St';
 
 // Tolerance for grouping monitors into the same row by Y coordinate
@@ -31,59 +29,50 @@ const ROW_TOLERANCE = 5;
 export default class MouseWarpExtension extends Extension {
     enable() {
         this._settings = this.getSettings('org.gnome.shell.extensions.mouse-warp');
-        this._edgeTolerance = this._settings.get_int('edge-tolerance');
-        this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
-        this._isEnabled = this._settings.get_boolean('is-enabled');
+        this._loadSettings();
 
         this._settingsChangedId = this._settings.connect('changed', () => {
-            this._edgeTolerance = this._settings.get_int('edge-tolerance');
-            this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
-            this._isEnabled = this._settings.get_boolean('is-enabled');
-            if (!this._isEnabled)
-                this._resetMotionState();
-            this._updateTrayToggle();
+            this._loadSettings();
         });
-
-        this._createTrayIcon();
 
         this._resetMotionState();
         this._boundaries = [];
+        this._feedbackWidgets = [];
 
         this._buildBoundaries();
 
         this._stageEventId = global.stage.connect('captured-event', (_, event) => {
-            if (event.type() === Clutter.EventType.MOTION)
-                this._onMotion();
+            if (event.type() === Clutter.EventType.MOTION) {
+                try {
+                    this._onMotion();
+                } catch (e) {
+                    // Never crash GNOME Shell — log and continue
+                    log(`[mouse-warp] motion handler error: ${e.message}`);
+                }
+            }
             return Clutter.EVENT_PROPAGATE;
         });
 
         this._monitorsChangedId = Main.layoutManager.connect(
             'monitors-changed',
-            () => this._buildBoundaries()
+            () => {
+                try {
+                    this._buildBoundaries();
+                } catch (e) {
+                    log(`[mouse-warp] boundary rebuild error: ${e.message}`);
+                }
+            }
         );
+
+        log(`[mouse-warp] enabled — ${this._boundaries.length} boundary(s) detected`);
     }
 
-    _createTrayIcon() {
-        this._indicator = new PanelMenu.Button(0.0, 'Mouse Warp Indicator', false);
-        let icon = new St.Icon({
-            icon_name: 'input-mouse-symbolic',
-            style_class: 'system-status-icon',
-        });
-        this._indicator.add_child(icon);
-
-        this._toggleSwitch = new PopupMenu.PopupSwitchMenuItem('Enable Mouse Warp', this._isEnabled);
-        this._toggleSwitch.connect('toggled', (item, state) => {
-            this._settings.set_boolean('is-enabled', state);
-        });
-
-        this._indicator.menu.addMenuItem(this._toggleSwitch);
-        Main.panel.addToStatusArea('mouse-warp-indicator', this._indicator);
-    }
-
-    _updateTrayToggle() {
-        if (this._toggleSwitch) {
-            this._toggleSwitch.setToggleState(this._isEnabled);
-        }
+    _loadSettings() {
+        this._edgeTolerance = this._settings.get_int('edge-tolerance');
+        this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
+        this._isEnabled = this._settings.get_boolean('is-enabled');
+        if (!this._isEnabled)
+            this._resetMotionState();
     }
 
     _resetMotionState() {
@@ -95,10 +84,12 @@ export default class MouseWarpExtension extends Extension {
     disable() {
         this._resetMotionState();
 
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
+        // Clean up any remaining feedback widgets
+        for (const w of this._feedbackWidgets) {
+            try { w.destroy(); } catch (_) {}
         }
+        this._feedbackWidgets = [];
+
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
@@ -114,6 +105,7 @@ export default class MouseWarpExtension extends Extension {
             this._monitorsChangedId = null;
         }
         this._boundaries = [];
+        log('[mouse-warp] disabled');
     }
 
     // ── Layout analysis ──────────────────────────────────────────────
@@ -168,7 +160,7 @@ export default class MouseWarpExtension extends Extension {
             const us = span(upper);
             const ls = span(lower);
 
-            // Only care if spans differ
+            // Only care if spans differ (different widths or offsets)
             if (Math.abs(us.width - ls.width) < 2 && Math.abs(us.left - ls.left) < 2)
                 continue;
 
@@ -177,6 +169,8 @@ export default class MouseWarpExtension extends Extension {
                 upper: {...us, indices: new Set(upperIdx)},
                 lower: {...ls, indices: new Set(lowerIdx)},
             });
+
+            log(`[mouse-warp] boundary at y=${upperBottom}: upper=[${us.left},${us.right}] w=${us.width}, lower=[${ls.left},${ls.right}] w=${ls.width}`);
         }
     }
 
@@ -194,30 +188,48 @@ export default class MouseWarpExtension extends Extension {
 
     _warp(x, y) {
         this._skipWarpEvent = true;
-        Clutter.get_default_backend().get_default_seat().warp_pointer(x, y);
-        this._showVisualFeedback(x, y);
+        try {
+            Clutter.get_default_backend().get_default_seat().warp_pointer(x, y);
+            this._showVisualFeedback(x, y);
+        } catch (e) {
+            log(`[mouse-warp] warp error: ${e.message}`);
+            this._skipWarpEvent = false;
+        }
     }
 
     _showVisualFeedback(x, y) {
-        const size = 60;
-        let widget = new St.Widget({
-            style: 'border-radius: 30px; background-color: rgba(136, 204, 255, 0.5); box-shadow: 0 0 10px rgba(136, 204, 255, 0.8);',
-            x: x - size / 2,
-            y: y - size / 2,
-            width: size,
-            height: size,
-        });
+        try {
+            const size = 40;
+            const widget = new St.Widget({
+                style: `border-radius: ${size/2}px; background-color: rgba(136, 204, 255, 0.4);`,
+                x: x - size / 2,
+                y: y - size / 2,
+                width: size,
+                height: size,
+                reactive: false,
+                can_focus: false,
+            });
 
-        Main.uiGroup.add_child(widget);
+            Main.uiGroup.add_child(widget);
+            this._feedbackWidgets.push(widget);
 
-        widget.ease({
-            opacity: 0,
-            scale_x: 1.5,
-            scale_y: 1.5,
-            duration: 300,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => widget.destroy()
-        });
+            widget.ease({
+                opacity: 0,
+                scale_x: 2.0,
+                scale_y: 2.0,
+                duration: 250,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    try {
+                        widget.destroy();
+                    } catch (_) {}
+                    const idx = this._feedbackWidgets.indexOf(widget);
+                    if (idx >= 0) this._feedbackWidgets.splice(idx, 1);
+                }
+            });
+        } catch (e) {
+            log(`[mouse-warp] visual feedback error: ${e.message}`);
+        }
     }
 
     _warpProportional(x, _y, from, to, targetY) {

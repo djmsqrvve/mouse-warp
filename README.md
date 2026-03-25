@@ -47,6 +47,24 @@ To uninstall:
 make uninstall
 ```
 
+## dj-cli integration
+
+The `dj display 3` command (Full Array layout) positions HDMI-1 flush-left at `(0, 0)` so Mouse Warp can proportionally map the full 1920px top row onto the 5120px bottom row (DP-3 + DP-1). This eliminates dead zones at both edges of the TV.
+
+```
+┌──────────────────┐
+│     HDMI-1       │
+│  1920×1080 @60Hz │
+│     (0, 0)       │
+├──────────────────┴──────────┬─────────────────────────────┐
+│         DP-3                │          DP-1 ★primary      │
+│    2560×1440 @60Hz          │     2560×1440 @170Hz        │
+│       (0, 1080)             │       (2560, 1080)          │
+└─────────────────────────────┴─────────────────────────────┘
+```
+
+Enable the extension after switching to layout 3 — the proportional mapping and visual feedback activate automatically.
+
 ## How it works
 
 1. On `enable()`, the extension reads `Main.layoutManager.monitors` and groups them into horizontal rows by Y-coordinate.
