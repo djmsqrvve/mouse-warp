@@ -13,7 +13,11 @@
  *      the x-coordinate is remapped proportionally so the full width of one row
  *      maps to the full width of the other.
  *
- * The math: ratio = (x - sourceLeft) / sourceWidth
+ * All geometry is computed live from Main.layoutManager.monitors on every
+ * motion event — no pre-built boundary cache. This handles hot-plugged
+ * monitors, resolution changes, and layout edits without requiring a restart.
+ *
+ * The math: ratio = (sourceX - sourceLeft) / sourceWidth
  *           newX  = targetLeft + ratio * targetWidth
  */
 
@@ -36,10 +40,7 @@ export default class MouseWarpExtension extends Extension {
         });
 
         this._resetMotionState();
-        this._boundaries = [];
         this._feedbackWidgets = [];
-
-        this._buildBoundaries();
 
         this._stageEventId = global.stage.connect('captured-event', (_, event) => {
             if (event.type() === Clutter.EventType.MOTION) {
@@ -53,18 +54,16 @@ export default class MouseWarpExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         });
 
+        // Reset motion state on layout changes to prevent stale crossings
         this._monitorsChangedId = Main.layoutManager.connect(
             'monitors-changed',
             () => {
-                try {
-                    this._buildBoundaries();
-                } catch (e) {
-                    log(`[mouse-warp] boundary rebuild error: ${e.message}`);
-                }
+                this._resetMotionState();
+                log('[mouse-warp] monitors changed — motion state reset');
             }
         );
 
-        log(`[mouse-warp] enabled — ${this._boundaries.length} boundary(s) detected`);
+        log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s)`);
     }
 
     _loadSettings() {
@@ -78,7 +77,6 @@ export default class MouseWarpExtension extends Extension {
     _resetMotionState() {
         this._skipWarpEvent = false;
         this._pressureStartTime = 0;
-        this._lastMonitorIndex = -1;
         this._lastY = -1;
         this._lastX = -1;
     }
@@ -106,87 +104,94 @@ export default class MouseWarpExtension extends Extension {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = null;
         }
-        this._boundaries = [];
         log('[mouse-warp] disabled');
     }
 
-    // ── Layout analysis ──────────────────────────────────────────────
+    // ── Live geometry helpers ─────────────────────────────────────
 
-    _buildBoundaries() {
-        const monitors = Main.layoutManager.monitors;
-        this._boundaries = [];
+    /**
+     * Compute the horizontal span of the monitor row containing the given Y.
+     * Groups monitors within ROW_TOLERANCE of each other into the same row.
+     * Returns null if Y is not inside any monitor.
+     */
+    _rowSpanAt(y, monitors) {
+        let seedY = null;
+        for (const m of monitors) {
+            if (y >= m.y && y < m.y + m.height) {
+                seedY = m.y;
+                break;
+            }
+        }
+        if (seedY === null) return null;
 
-        if (!monitors || monitors.length < 2)
-            return;
+        const row = monitors.filter(m => Math.abs(m.y - seedY) <= ROW_TOLERANCE);
+        const left = Math.min(...row.map(m => m.x));
+        const right = Math.max(...row.map(m => m.x + m.width));
+        const top = Math.min(...row.map(m => m.y));
+        const bottom = Math.max(...row.map(m => m.y + m.height));
+        return {left, right, width: right - left, top, bottom};
+    }
 
-        // Group monitors into rows by top-edge Y
-        const rows = new Map();
-        for (let i = 0; i < monitors.length; i++) {
-            const my = monitors[i].y;
-            let placed = false;
-            for (const [rowY, members] of rows) {
-                if (Math.abs(my - rowY) <= ROW_TOLERANCE) {
-                    members.push(i);
-                    placed = true;
-                    break;
+    /**
+     * Check if the cursor is in a dead zone — near the edge of its monitor
+     * with no direct neighbor above/below at this X, but an adjacent row
+     * exists at some other X range.
+     *
+     * Returns {sourceRow, targetRow, warpY} or null.
+     */
+    _findDeadZone(x, y, monitors) {
+        const curMon = monitors.find(m =>
+            x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height);
+        if (!curMon) return null;
+
+        const nearTop = (y - curMon.y) <= this._edgeTolerance;
+        const nearBottom = (curMon.y + curMon.height - 1 - y) <= this._edgeTolerance;
+
+        if (nearTop) {
+            const hasAbove = monitors.some(m =>
+                Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE &&
+                x >= m.x && x < m.x + m.width);
+            if (!hasAbove) {
+                const adj = monitors.filter(m =>
+                    Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE);
+                if (adj.length > 0) {
+                    const sourceRow = this._rowSpanAt(y, monitors);
+                    const tLeft = Math.min(...adj.map(m => m.x));
+                    const tRight = Math.max(...adj.map(m => m.x + m.width));
+                    return {
+                        sourceRow,
+                        targetRow: {left: tLeft, right: tRight, width: tRight - tLeft},
+                        warpY: curMon.y - this._edgeTolerance - 1,
+                    };
                 }
             }
-            if (!placed)
-                rows.set(my, [i]);
         }
 
-        // Sort rows top-to-bottom
-        const sorted = [...rows.entries()]
-            .sort((a, b) => a[0] - b[0])
-            .map(([, indices]) => indices);
-
-        // Find pairs of adjacent rows that share a horizontal boundary
-        for (let r = 0; r < sorted.length - 1; r++) {
-            const upperIdx = sorted[r];
-            const lowerIdx = sorted[r + 1];
-
-            const upper = upperIdx.map(i => monitors[i]);
-            const lower = lowerIdx.map(i => monitors[i]);
-
-            const upperBottom = Math.max(...upper.map(m => m.y + m.height));
-            const lowerTop = Math.min(...lower.map(m => m.y));
-
-            if (Math.abs(upperBottom - lowerTop) > ROW_TOLERANCE)
-                continue;
-
-            const span = ms => {
-                const l = Math.min(...ms.map(m => m.x));
-                const r = Math.max(...ms.map(m => m.x + m.width));
-                return {left: l, right: r, width: r - l};
-            };
-            const us = span(upper);
-            const ls = span(lower);
-
-            // Only care if spans differ (different widths or offsets)
-            if (Math.abs(us.width - ls.width) < 2 && Math.abs(us.left - ls.left) < 2)
-                continue;
-
-            this._boundaries.push({
-                y: Math.round((upperBottom + lowerTop) / 2),
-                upper: {...us, indices: new Set(upperIdx)},
-                lower: {...ls, indices: new Set(lowerIdx)},
-            });
-
-            log(`[mouse-warp] boundary at y=${upperBottom}: upper=[${us.left},${us.right}] w=${us.width}, lower=[${ls.left},${ls.right}] w=${ls.width}`);
+        if (nearBottom) {
+            const bottomEdge = curMon.y + curMon.height;
+            const hasBelow = monitors.some(m =>
+                Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE &&
+                x >= m.x && x < m.x + m.width);
+            if (!hasBelow) {
+                const adj = monitors.filter(m =>
+                    Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE);
+                if (adj.length > 0) {
+                    const sourceRow = this._rowSpanAt(y, monitors);
+                    const tLeft = Math.min(...adj.map(m => m.x));
+                    const tRight = Math.max(...adj.map(m => m.x + m.width));
+                    return {
+                        sourceRow,
+                        targetRow: {left: tLeft, right: tRight, width: tRight - tLeft},
+                        warpY: bottomEdge + this._edgeTolerance + 1,
+                    };
+                }
+            }
         }
+
+        return null;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
-
-    _monitorIndexAt(x, y) {
-        const monitors = Main.layoutManager.monitors;
-        for (let i = 0; i < monitors.length; i++) {
-            const m = monitors[i];
-            if (x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height)
-                return i;
-        }
-        return -1;
-    }
 
     _warp(x, y) {
         this._skipWarpEvent = true;
@@ -234,13 +239,6 @@ export default class MouseWarpExtension extends Extension {
         }
     }
 
-    _warpProportional(x, _y, from, to, targetY) {
-        const ratio = Math.max(0, Math.min(1, (x - from.left) / from.width));
-        const newX = Math.round(to.left + ratio * (to.width - 1));
-        if (Math.abs(newX - x) > 1 || targetY !== _y)
-            this._warp(newX, targetY);
-    }
-
     // ── Event handler ────────────────────────────────────────────────
 
     _onMotion() {
@@ -253,47 +251,44 @@ export default class MouseWarpExtension extends Extension {
         if (this._skipWarpEvent) {
             this._skipWarpEvent = false;
             const [sx, sy] = global.get_pointer();
-            this._lastMonitorIndex = this._monitorIndexAt(sx, sy);
             this._lastX = sx;
             this._lastY = sy;
             return;
         }
 
         const [x, y] = global.get_pointer();
-        const monIdx = this._monitorIndexAt(x, y);
+        const monitors = Main.layoutManager.monitors;
 
-        // ── Boundary crossing: detect when Y crosses a boundary line ──
-        // This catches ALL crossings — even when Mutter silently moves the
-        // cursor between overlapping monitors without triggering a monitor
-        // index change in a single frame.
+        if (!monitors || monitors.length < 2) {
+            this._lastX = x;
+            this._lastY = y;
+            return;
+        }
+
+        // ── Boundary crossing: detect row change via live geometry ──
         if (this._lastY >= 0) {
-            for (const b of this._boundaries) {
-                const crossedDown = this._lastY <= b.y && y > b.y;
-                const crossedUp = this._lastY >= b.y && y < b.y;
+            const srcRow = this._rowSpanAt(this._lastY, monitors);
+            const tgtRow = this._rowSpanAt(y, monitors);
 
-                if (crossedDown) {
-                    // Came from upper row → entering lower row
-                    // Remap x from upper span to lower span
-                    if (x >= b.upper.left && x < b.upper.right) {
-                        log(`[mouse-warp] CROSS DOWN at y=${b.y}: x=${x} from=[${b.upper.left},${b.upper.right}] to=[${b.lower.left},${b.lower.right}]`);
-                        this._warpProportional(x, y, b.upper, b.lower, y);
-                        this._lastMonitorIndex = this._monitorIndexAt(...global.get_pointer());
-                        this._lastX = global.get_pointer()[0];
-                        this._lastY = global.get_pointer()[1];
-                        this._pressureStartTime = 0;
-                        return;
-                    }
-                }
-
-                if (crossedUp) {
-                    // Came from lower row → entering upper row
-                    // Remap x from lower span to upper span
-                    if (x >= b.lower.left && x < b.lower.right) {
-                        log(`[mouse-warp] CROSS UP at y=${b.y}: x=${x} from=[${b.lower.left},${b.lower.right}] to=[${b.upper.left},${b.upper.right}]`);
-                        this._warpProportional(x, y, b.lower, b.upper, y);
-                        this._lastMonitorIndex = this._monitorIndexAt(...global.get_pointer());
-                        this._lastX = global.get_pointer()[0];
-                        this._lastY = global.get_pointer()[1];
+            if (srcRow && tgtRow && srcRow.top !== tgtRow.top) {
+                // Different rows — remap if spans differ
+                if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
+                    Math.abs(srcRow.left - tgtRow.left) >= 2) {
+                    // Use _lastX (source position before GNOME moved the cursor)
+                    const sourceX = this._lastX;
+                    if (sourceX >= srcRow.left && sourceX < srcRow.right) {
+                        const ratio = Math.max(0, Math.min(1,
+                            (sourceX - srcRow.left) / srcRow.width));
+                        const newX = Math.round(
+                            tgtRow.left + ratio * (tgtRow.width - 1));
+                        log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
+                            `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
+                            `x=${sourceX}->${newX}`);
+                        if (Math.abs(newX - x) > 1)
+                            this._warp(newX, y);
+                        const [px, py] = global.get_pointer();
+                        this._lastX = px;
+                        this._lastY = py;
                         this._pressureStartTime = 0;
                         return;
                     }
@@ -301,57 +296,30 @@ export default class MouseWarpExtension extends Extension {
             }
         }
 
-        // ── Dead zone: cursor stuck at edge ──
-        for (const b of this._boundaries) {
-            // Trying to go UP from lower row
-            if (
-                Math.abs(y - b.y) <= this._edgeTolerance &&
-                x >= b.lower.left && x < b.lower.right &&
-                (x < b.upper.left || x >= b.upper.right)
-            ) {
-                if (this._pressureStartTime === 0) {
-                    this._pressureStartTime = GLib.get_monotonic_time();
-                } else {
-                    const elapsedMs = (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
-                    if (elapsedMs > this._pressureThresholdMs) {
-                        const ratio = Math.max(0, Math.min(1,
-                            (x - b.lower.left) / b.lower.width));
-                        const newX = Math.round(
-                            b.upper.left + ratio * (b.upper.width - 1));
-                        this._warp(newX, b.y - this._edgeTolerance - 1);
-                        this._pressureStartTime = 0;
-                    }
+        // ── Dead zone: cursor stuck at edge with no direct neighbor ──
+        const deadZone = this._findDeadZone(x, y, monitors);
+        if (deadZone) {
+            if (this._pressureStartTime === 0) {
+                this._pressureStartTime = GLib.get_monotonic_time();
+            } else {
+                const elapsedMs =
+                    (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
+                if (elapsedMs > this._pressureThresholdMs) {
+                    const {sourceRow, targetRow, warpY} = deadZone;
+                    const ratio = Math.max(0, Math.min(1,
+                        (x - sourceRow.left) / sourceRow.width));
+                    const newX = Math.round(
+                        targetRow.left + ratio * (targetRow.width - 1));
+                    this._warp(newX, warpY);
+                    this._pressureStartTime = 0;
                 }
-                this._lastMonitorIndex = monIdx;
-                return;
             }
-
-            // Trying to go DOWN from upper row
-            if (
-                Math.abs(y - b.y) <= this._edgeTolerance &&
-                x >= b.upper.left && x < b.upper.right &&
-                (x < b.lower.left || x >= b.lower.right)
-            ) {
-                if (this._pressureStartTime === 0) {
-                    this._pressureStartTime = GLib.get_monotonic_time();
-                } else {
-                    const elapsedMs = (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
-                    if (elapsedMs > this._pressureThresholdMs) {
-                        const ratio = Math.max(0, Math.min(1,
-                            (x - b.upper.left) / b.upper.width));
-                        const newX = Math.round(
-                            b.lower.left + ratio * (b.lower.width - 1));
-                        this._warp(newX, b.y + this._edgeTolerance + 1);
-                        this._pressureStartTime = 0;
-                    }
-                }
-                this._lastMonitorIndex = monIdx;
-                return;
-            }
+            this._lastX = x;
+            this._lastY = y;
+            return;
         }
 
         this._pressureStartTime = 0;
-        this._lastMonitorIndex = monIdx;
         this._lastX = x;
         this._lastY = y;
     }

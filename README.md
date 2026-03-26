@@ -67,12 +67,13 @@ Enable the extension after switching to layout 3 — the proportional mapping an
 
 ## How it works
 
-1. On `enable()`, the extension reads `Main.layoutManager.monitors` and groups them into horizontal rows by Y-coordinate.
-2. Adjacent rows with different total x-spans get a proportional mapping boundary registered.
-3. A `captured-event` handler on the global stage watches every pointer motion event:
-   - If the cursor just changed monitors across a boundary → remap x proportionally.
-   - If the cursor is stuck in a dead zone at a boundary → count pressure, then warp after a threshold.
-4. On monitor hot-plug (`monitors-changed`), boundaries are recalculated automatically.
+1. On `enable()`, the extension connects a `captured-event` handler to the global stage that watches every pointer motion event.
+2. On each motion, geometry is computed live from `Main.layoutManager.monitors` — no pre-built cache:
+   - `_rowSpanAt(y)` determines which monitor row the cursor is in and its full horizontal span.
+   - `_findDeadZone(x, y)` checks if the cursor is near an edge with no direct neighbor above/below.
+3. If the cursor crossed between rows (source row differs from target row), the x-coordinate is remapped proportionally using the source position (`_lastX`) for accurate mapping.
+4. If the cursor is stuck in a dead zone, a time-based pressure timer triggers a proportional warp after a configurable threshold.
+5. On monitor hot-plug (`monitors-changed`), motion state resets — the next event reads the new layout automatically.
 
 No configuration needed for layout detection — it auto-detects your layout.
 
@@ -109,7 +110,7 @@ dj video layout 3         # Apply flush-left TV layout for mouse-warp
 
 ## Testing
 
-Run the full test suite (154 assertions) locally:
+Run the full test suite (182 assertions) locally:
 
 ```bash
 bash tests/run_tests.sh

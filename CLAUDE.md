@@ -16,7 +16,7 @@ JavaScript (GJS/GNOME Shell Extension API), GSettings, Clutter, St.
 make install                                  # Compile schemas + copy to extensions dir
 make package                                  # Create .zip for distribution
 gnome-extensions enable mouse-warp@djmsqrvve  # Enable (requires re-login on Wayland)
-bash tests/run_tests.sh                       # Run 154 assertions (Node.js)
+bash tests/run_tests.sh                       # Run 182 assertions (Node.js)
 docker compose run tests                      # Run tests in container
 
 # Via dj CLI
@@ -39,12 +39,12 @@ Formula: `ratio = (x - srcLeft) / srcWidth` → `newX = tgtLeft + ratio * tgtWid
 ## Architecture
 
 ```
-extension.js       # Core: enable/disable, boundary detection, motion handler, warp
+extension.js       # Core: enable/disable, live geometry, motion handler, warp
 prefs.js           # GTK4/Adwaita preferences window (3 settings)
 metadata.json      # Extension UUID + GNOME Shell version compat (47-50)
 schemas/           # GSettings schema (edge-tolerance, pressure-threshold-ms, is-enabled)
 visualizer.html    # Interactive monitor layout preview (open in browser)
-tests/             # 154 assertions across 4 test files (Node.js)
+tests/             # 182 assertions across 3 test files (Node.js)
 ```
 
 ## Configuration

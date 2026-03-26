@@ -3,18 +3,19 @@
 ## Architecture
 
 GNOME Shell extension with the following files:
-- `extension.js` — core logic, system tray toggle, visual feedback
+- `extension.js` — core logic, live geometry computation, visual feedback
 - `prefs.js` — GTK4/Adwaita preferences window
 - `schemas/` — GSettings XML schema for user configuration
 
 ### Core flow
 
-1. `enable()` → loads GSettings, creates system tray indicator, reads monitor layout, connects to stage motion events
-2. `_buildBoundaries()` → groups monitors into horizontal rows by Y, finds adjacent rows with mismatched widths, registers proportional mapping boundaries
-3. `_onMotion()` → on every pointer motion (if `is-enabled` is true):
-   - **Overlap crossing**: if cursor changed monitors across a registered boundary, remap x proportionally
-   - **Dead-zone pressure**: if cursor is stuck at a boundary edge (no monitor above/below), start a timer and warp after the configurable time threshold
-4. `_showVisualFeedback()` → draws a glowing circle at the warp destination that fades out over 300ms
+1. `enable()` → loads GSettings, connects to stage motion events, registers `monitors-changed` for state reset
+2. `_onMotion()` → on every pointer motion (if `is-enabled` is true), computes geometry live:
+   - `_rowSpanAt(y)` → finds the monitor row at a given Y and computes its horizontal span (left/right/width/top/bottom), grouping monitors within `ROW_TOLERANCE`
+   - **Boundary crossing**: if `_lastY` was in one row and current `y` is in a different row, remap x proportionally using `_lastX` (source position before GNOME moved the cursor)
+   - `_findDeadZone(x, y)` → checks if cursor is near a monitor edge with no direct neighbor above/below at this X, but an adjacent row exists
+   - **Dead-zone pressure**: if in a dead zone, start a timer and warp after the configurable time threshold
+3. `_showVisualFeedback()` → draws a glowing circle at the warp destination that fades out over 250ms
 
 ### Key APIs
 
@@ -36,7 +37,7 @@ Monitor layout used during development:
 - DP-3 (second): 2560x1440 @ +0+1080
 - HDMI-1 (TV): 1920x1080 @ +0+0 (flush-left, managed by `dj display 3`)
 
-### Automated tests (154 assertions)
+### Automated tests (182 assertions)
 
 Run locally with Node.js:
 ```bash
@@ -48,8 +49,9 @@ Or via Docker (also validates schema compilation with glib):
 docker compose run tests
 ```
 
-Tests cover: schema validation, boundary building, proportional warp math, time-based pressure,
-enable/disable lifecycle, tray toggle, visual feedback, settings sync, and file structure.
+Tests cover: schema validation, row span computation, dead zone detection, proportional warp math,
+time-based pressure, boundary crossing (live geometry), enable/disable lifecycle, visual feedback,
+settings sync, hot-reload, source position accuracy, and file structure.
 
 CI runs automatically on push/PR via GitHub Actions (`.github/workflows/test.yml`).
 
