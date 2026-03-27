@@ -154,12 +154,7 @@ class TestableMouseWarp {
 
         this._resetMotionState();
         this._feedbackWidgets = [];
-
-        this._stageEventId = mockGlobal.stage.connect('captured-event', (_, event) => {
-            if (event.type() === mockClutter.EventType.MOTION)
-                this._onMotion();
-            return mockClutter.EVENT_PROPAGATE;
-        });
+        this._warpCooldownUntil = 0;
 
         this._monitorsChangedId = mockMain.layoutManager.connect(
             'monitors-changed', () => this._resetMotionState()
@@ -183,7 +178,6 @@ class TestableMouseWarp {
     }
 
     _resetMotionState() {
-        this._skipWarpEvent = false;
         this._pressureStartTime = 0;
         this._lastY = -1;
         this._lastX = -1;
@@ -288,9 +282,11 @@ class TestableMouseWarp {
     // ── Helpers ──────────────────────────────────────────────────────
 
     _warp(x, y) {
-        this._skipWarpEvent = true;
+        this._warpCooldownUntil = mockMonoTime + 100000;
         mockClutter.get_default_backend().get_default_seat().warp_pointer(x, y);
         this._showVisualFeedback(x, y);
+        this._lastX = x;
+        this._lastY = y;
     }
 
     _showVisualFeedback(x, y) {
@@ -314,23 +310,28 @@ class TestableMouseWarp {
         visualFeedbackCalls.push({ x, y, widget });
     }
 
-    // ── Event handler ────────────────────────────────────────────────
+    // ── Polled motion handler ─────────────────────────────────────
 
-    _onMotion() {
+    _onPoll() {
         if (!this._isEnabled) {
             this._resetMotionState();
             return;
         }
 
-        if (this._skipWarpEvent) {
-            this._skipWarpEvent = false;
-            const [sx, sy] = mockGlobal.get_pointer();
-            this._lastX = sx;
-            this._lastY = sy;
+        const [x, y] = mockGlobal.get_pointer();
+
+        // Skip if cursor hasn't moved AND no active pressure timer
+        if (x === this._lastX && y === this._lastY && this._pressureStartTime === 0)
+            return;
+
+        // During warp cooldown, just track position
+        if (mockMonoTime < this._warpCooldownUntil) {
+            this._lastX = x;
+            this._lastY = y;
+            this._pressureStartTime = 0;
             return;
         }
 
-        const [x, y] = mockGlobal.get_pointer();
         const monitors = mockMain.layoutManager.monitors;
 
         if (!monitors || monitors.length < 2) {
@@ -357,9 +358,10 @@ class TestableMouseWarp {
                                 tgtRow.left + ratio * (tgtRow.width - 1));
                             if (Math.abs(newX - x) > 1)
                                 this._warp(newX, y);
-                            const [px, py] = mockGlobal.get_pointer();
-                            this._lastX = px;
-                            this._lastY = py;
+                            else {
+                                this._lastX = x;
+                                this._lastY = y;
+                            }
                             this._pressureStartTime = 0;
                             return;
                         }
@@ -369,27 +371,27 @@ class TestableMouseWarp {
 
             // Dead zone: cursor stuck at edge with no direct neighbor
             const deadZone = this._findDeadZone(x, y, monitors);
-        if (deadZone) {
-            if (this._pressureStartTime === 0) {
-                this._pressureStartTime = mockGLib.get_monotonic_time();
-            } else {
-                const elapsedMs =
-                    (mockGLib.get_monotonic_time() - this._pressureStartTime) / 1000;
-                if (elapsedMs > this._pressureThresholdMs) {
-                    const {sourceRow, targetRow, warpY} = deadZone;
-                    const ratio = Math.max(0, Math.min(1,
-                        (x - sourceRow.left) / sourceRow.width));
-                    const newX = Math.round(
-                        targetRow.left + ratio * (targetRow.width - 1));
-                    this._warp(newX, warpY);
-                    this._pressureStartTime = 0;
+            if (deadZone) {
+                if (this._pressureStartTime === 0) {
+                    this._pressureStartTime = mockGLib.get_monotonic_time();
+                } else {
+                    const elapsedMs =
+                        (mockGLib.get_monotonic_time() - this._pressureStartTime) / 1000;
+                    if (elapsedMs > this._pressureThresholdMs) {
+                        const {sourceRow, targetRow, warpY} = deadZone;
+                        const ratio = Math.max(0, Math.min(1,
+                            (x - sourceRow.left) / sourceRow.width));
+                        const newX = Math.round(
+                            targetRow.left + ratio * (targetRow.width - 1));
+                        this._warp(newX, warpY);
+                        this._pressureStartTime = 0;
+                    }
                 }
+                this._lastX = x;
+                this._lastY = y;
+                return;
             }
-            this._lastX = x;
-            this._lastY = y;
-            return;
         }
-        } // end if (this._warpEnabled)
 
         this._pressureStartTime = 0;
         this._lastX = x;
@@ -549,18 +551,18 @@ setupDualRowMonitors();
     // First motion: starts timer
     mockMonoTime = 1000000;
     warpedTo = null;
-    ext._onMotion();
+    ext._onPoll();
     assert(ext._pressureStartTime > 0, 'Pressure timer started on first edge contact');
     assert(warpedTo === null, 'No warp yet on first contact');
 
     // Second motion: not enough time elapsed (only 50ms)
     mockMonoTime = 1050000;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo === null, 'No warp at 50ms (threshold is 150ms)');
 
     // Third motion: enough time elapsed (200ms total)
     mockMonoTime = 1200000;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Warp triggered after 200ms exceeds 150ms threshold');
     assert(ext._pressureStartTime === 0, 'Pressure timer reset after warp');
 
@@ -585,13 +587,13 @@ setupDualRowMonitors();
     mockGlobal._pointerX = 0;
     mockGlobal._pointerY = 1080;
     mockMonoTime = 1000000;
-    ext._onMotion();
+    ext._onPoll();
     assert(ext._pressureStartTime > 0, 'Pressure started');
 
     // Move cursor away from the edge into the body of the monitor
     mockGlobal._pointerX = 500;
     mockGlobal._pointerY = 1500;
-    ext._onMotion();
+    ext._onPoll();
     assertEqual(ext._pressureStartTime, 0, 'Pressure timer reset when cursor moved away from edge');
 
     ext.disable();
@@ -617,7 +619,7 @@ setupDualRowMonitors();
     mockMonoTime = 1000000;
     warpedTo = null;
 
-    ext._onMotion();
+    ext._onPoll();
     assertEqual(ext._pressureStartTime, 0, 'No pressure timer recorded when disabled');
     assert(warpedTo === null, 'No warp when extension is disabled');
 
@@ -640,14 +642,12 @@ setupDualRowMonitors();
     assertEqual(ext._pressureThresholdMs, 150, 'pressureThresholdMs loaded from settings default (150)');
     assertEqual(ext._isEnabled, true, 'isEnabled loaded from settings default (true)');
 
-    ext._skipWarpEvent = true;
     ext._pressureStartTime = 12345;
     ext._lastY = 1500;
     ext._lastX = 500;
     ext.disable();
     assert(ext._settings === null, 'Settings nulled on disable');
     assertEqual(ext._feedbackWidgets.length, 0, 'Feedback widgets cleaned up on disable');
-    assertEqual(ext._skipWarpEvent, false, 'skipWarpEvent cleared on disable');
     assertEqual(ext._pressureStartTime, 0, 'Pressure timer cleared on disable');
     assertEqual(ext._lastY, -1, 'lastY reset on disable');
     assertEqual(ext._lastX, -1, 'lastX reset on disable');
@@ -723,17 +723,15 @@ setupDualRowMonitors();
     mockGlobal._pointerX = 0;
     mockGlobal._pointerY = 1080;
     mockMonoTime = 1000000;
-    ext._onMotion();
+    ext._onPoll();
     assert(ext._pressureStartTime > 0, 'Pressure started before disabling via settings');
 
-    ext._skipWarpEvent = true;
     settingsStore['is-enabled'] = false;
     for (const cb of Object.values(settingsListeners)) {
         cb();
     }
 
     assertEqual(ext._pressureStartTime, 0, 'Pressure timer cleared when setting is disabled');
-    assertEqual(ext._skipWarpEvent, false, 'skipWarpEvent cleared when setting is disabled');
     assertEqual(ext._lastY, -1, 'lastY reset when setting is disabled');
     assertEqual(ext._lastX, -1, 'lastX reset when setting is disabled');
 
@@ -748,7 +746,7 @@ setupDualRowMonitors();
 
     warpedTo = null;
     mockMonoTime = 2000000;
-    ext._onMotion();
+    ext._onPoll();
 
     assert(warpedTo === null, 'No immediate warp after re-enabling');
     assertEqual(ext._pressureStartTime, 2000000, 'Pressure restarts from a fresh timestamp after re-enabling');
@@ -756,9 +754,9 @@ setupDualRowMonitors();
     ext.disable();
 }
 
-// ── 10. Skip Warp Event ─────────────────────────────────────────────
+// ── 10. Warp Cooldown ────────────────────────────────────────────────
 
-console.log('\n\u2500\u2500 10. Skip Warp Event \u2500\u2500');
+console.log('\n\u2500\u2500 10. Warp Cooldown \u2500\u2500');
 
 resetMocks();
 setupDualRowMonitors();
@@ -766,17 +764,31 @@ setupDualRowMonitors();
     const ext = new TestableMouseWarp();
     ext.enable();
 
-    ext._skipWarpEvent = true;
-    mockGlobal._pointerX = 500;
-    mockGlobal._pointerY = 500;
+    // Simulate a warp that sets cooldown
+    mockMonoTime = 1000000;
+    ext._warp(2560, 1081);
+    assert(ext._warpCooldownUntil > mockMonoTime, 'Warp sets cooldown timer');
+    assertEqual(ext._lastX, 2560, 'Warp updates lastX immediately');
+    assertEqual(ext._lastY, 1081, 'Warp updates lastY immediately');
 
-    const prevPressure = ext._pressureStartTime;
-    ext._onMotion();
+    // During cooldown, poll just tracks position without triggering crossings
+    mockGlobal._pointerX = 2560;
+    mockGlobal._pointerY = 1081;
+    warpedTo = null;
+    ext._onPoll(); // no-op, position unchanged
 
-    assertEqual(ext._skipWarpEvent, false, 'skipWarpEvent reset after consuming');
-    assertEqual(ext._lastX, 500, 'lastX updated during skip');
-    assertEqual(ext._lastY, 500, 'lastY updated during skip');
-    assertEqual(ext._pressureStartTime, prevPressure, 'Pressure timer unchanged during skip event');
+    mockGlobal._pointerX = 2560;
+    mockGlobal._pointerY = 1090;
+    ext._onPoll(); // within cooldown, just tracks
+    assertEqual(ext._lastY, 1090, 'Position tracked during cooldown');
+    assert(warpedTo === null || warpedTo.y === 1081, 'No re-warp during cooldown');
+
+    // After cooldown expires, normal processing resumes
+    mockMonoTime = 2000000; // well past cooldown
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1079;
+    ext._onPoll();
+    assertEqual(ext._lastY, 1079, 'Normal tracking after cooldown');
 
     ext.disable();
 }
@@ -870,13 +882,13 @@ setupDualRowMonitors();
     // Prime _lastX/_lastY on TV (source position for proportional mapping)
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
 
     // Move cursor to first pixel of lower row (y=1080)
     warpedTo = null;
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Cross down detected at exact boundary pixel y=1080');
     // _lastX=960 on upper row [320, 2240): ratio = (960-320)/1920 = 0.333
     // newX = 0 + 0.333 * 5119 = ~1706
@@ -895,12 +907,12 @@ setupDualRowMonitors();
 
     mockGlobal._pointerX = 320;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 320;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Cross down from TV left edge triggers warp');
     assertEqual(warpedTo.x, 0, 'TV left edge (x=320) maps to lower row left edge (x=0)');
 
@@ -916,12 +928,12 @@ setupDualRowMonitors();
 
     mockGlobal._pointerX = 2239;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 2239;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Cross down from TV right edge triggers warp');
     assertApprox(warpedTo.x, 5116, 2, 'TV right edge (x=2239) maps near lower row right edge');
     assert(warpedTo.x >= 2560, 'Right edge of TV lands on DP-1 (x >= 2560)');
@@ -939,12 +951,12 @@ setupDualRowMonitors();
     // Prime on lower row in overlap zone
     mockGlobal._pointerX = 1000;
     mockGlobal._pointerY = 1200;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 1000;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Cross up detected from lower to upper row');
     // _lastX=1000 on lower row [0, 5120): ratio = 1000/5120 = 0.1953
     // newX = 320 + 0.1953 * 1919 = ~695
@@ -962,12 +974,12 @@ setupDualRowMonitors();
 
     mockGlobal._pointerX = 500;
     mockGlobal._pointerY = 500;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 1500;
     mockGlobal._pointerY = 800;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo === null, 'No warp when moving within the same row');
 
     ext.disable();
@@ -987,12 +999,12 @@ mockMain.layoutManager.monitors = [
     // Cross down from centre of TV (x=960)
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Cross down detected with flush-left TV');
     // _lastX=960, upper row [0, 1920): ratio = 960/1920 = 0.5
     // newX = 0 + 0.5 * 5119 = 2560
@@ -1015,7 +1027,7 @@ setupDualRowMonitors();
     // Prime on TV
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 500;
-    ext._onMotion();
+    ext._onPoll();
     assertEqual(ext._lastY, 500, 'lastY primed before layout change');
 
     // Simulate monitor layout change (e.g. resolution change)
@@ -1036,12 +1048,12 @@ setupDualRowMonitors();
     // Now cross down with new layout — should use new geometry
     mockGlobal._pointerX = 1920;
     mockGlobal._pointerY = 2159;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 1920;
     mockGlobal._pointerY = 2160;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Crossing works immediately after layout change');
     // _lastX=1920, upper row [0, 3840): ratio = 1920/3840 = 0.5
     // newX = 0 + 0.5 * 5119 = 2560
@@ -1064,14 +1076,14 @@ setupDualRowMonitors();
     // then GNOME moves it to DP-3 at a different X
     mockGlobal._pointerX = 2200;  // Near right edge of TV
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
     assertEqual(ext._lastX, 2200, '_lastX captured at source position');
 
     // GNOME delivers cursor at a shifted X on the lower row
     warpedTo = null;
     mockGlobal._pointerX = 1500;  // GNOME moved X when crossing
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Crossing detected despite X shift');
     // Proportional mapping should use _lastX=2200, NOT current x=1500
     // ratio = (2200 - 320) / 1920 = 1880/1920 = 0.979
@@ -1100,12 +1112,12 @@ setupDualRowMonitors();
     // Prime and cross boundary — should NOT warp
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1079;
-    ext._onMotion();
+    ext._onPoll();
 
     warpedTo = null;
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo === null, 'No warp when warp-enabled is false');
 
     // lastY should still track (needed for overlay)
@@ -1121,7 +1133,7 @@ setupDualRowMonitors();
     warpedTo = null;
     mockGlobal._pointerX = 960;
     mockGlobal._pointerY = 1080;
-    ext._onMotion();
+    ext._onPoll();
     assert(warpedTo !== null, 'Warp works again after re-enabling');
 
     ext.disable();

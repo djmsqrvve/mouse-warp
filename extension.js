@@ -6,20 +6,21 @@
  * coordinates. This extension fixes that by:
  *
  *   1. Dead-zone warping — when the cursor is stuck at an edge with no monitor
- *      above/below, it detects "pressure" (consecutive motion events at the
- *      boundary) and warps the cursor proportionally to the adjacent row.
+ *      above/below, it detects "pressure" (time at edge) and warps proportionally.
  *
- *   2. Overlap-zone remapping — when the cursor naturally crosses between rows,
- *      the x-coordinate is remapped proportionally so the full width of one row
- *      maps to the full width of the other.
+ *   2. Overlap-zone remapping — when the cursor crosses between rows, the
+ *      x-coordinate is remapped proportionally across the full row width.
  *
- * All geometry is computed live from Main.layoutManager.monitors on every
- * motion event — no pre-built boundary cache.
+ * IMPORTANT: On Wayland, global.stage captured-event only delivers motion events
+ * for the primary monitor. To track cursor position across ALL monitors, we poll
+ * global.get_pointer() via GLib.timeout_add at ~120Hz. This works because
+ * get_pointer() returns the real compositor cursor position regardless of which
+ * monitor the pointer is on.
  *
  * Debug tools (toggle via prefs):
- *   - Per-monitor colored cursor overlay — shows which monitor the extension sees
- *   - Click flash — shows true click position
- *   - Coordinate label — shows (x, y) and monitor index
+ *   - Per-monitor colored cursor overlay
+ *   - Click flash at true click position
+ *   - Coordinate label showing (x, y) and monitor index
  */
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -29,6 +30,8 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 const ROW_TOLERANCE = 5;
+const POLL_INTERVAL_MS = 8; // ~120Hz pointer polling
+const WARP_COOLDOWN_US = 100000; // 100ms cooldown after warp (microseconds)
 
 export default class MouseWarpExtension extends Extension {
     enable() {
@@ -49,16 +52,22 @@ export default class MouseWarpExtension extends Extension {
         this._overlayWidget = null;
         this._overlayLastMonitor = -1;
         this._debugLabel = null;
+        this._warpCooldownUntil = 0;
 
+        // Poll global.get_pointer() for cursor position on ALL monitors.
+        // captured-event only delivers MOTION on the primary monitor (Wayland).
+        this._pollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_INTERVAL_MS, () => {
+            try {
+                this._onPoll();
+            } catch (e) {
+                log(`[mouse-warp] poll error: ${e.message}`);
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+
+        // Keep captured-event for BUTTON_PRESS (click flash) — works on primary
         this._stageEventId = global.stage.connect('captured-event', (_, event) => {
-            const etype = event.type();
-            if (etype === Clutter.EventType.MOTION) {
-                try {
-                    this._onMotion();
-                } catch (e) {
-                    log(`[mouse-warp] motion handler error: ${e.message}`);
-                }
-            } else if (etype === Clutter.EventType.BUTTON_PRESS) {
+            if (event.type() === Clutter.EventType.BUTTON_PRESS) {
                 try {
                     this._onButtonPress();
                 } catch (e) {
@@ -77,7 +86,7 @@ export default class MouseWarpExtension extends Extension {
             }
         );
 
-        log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s)`);
+        log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s), polling at ${POLL_INTERVAL_MS}ms`);
     }
 
     _loadSettings() {
@@ -98,7 +107,6 @@ export default class MouseWarpExtension extends Extension {
     }
 
     _resetMotionState() {
-        this._skipWarpEvent = false;
         this._pressureStartTime = 0;
         this._lastY = -1;
         this._lastX = -1;
@@ -106,6 +114,11 @@ export default class MouseWarpExtension extends Extension {
 
     disable() {
         this._resetMotionState();
+
+        if (this._pollTimerId) {
+            GLib.source_remove(this._pollTimerId);
+            this._pollTimerId = null;
+        }
 
         for (const w of this._feedbackWidgets) {
             try { w.destroy(); } catch (_) {}
@@ -327,13 +340,17 @@ export default class MouseWarpExtension extends Extension {
     // ── Helpers ──────────────────────────────────────────────────────
 
     _warp(x, y) {
-        this._skipWarpEvent = true;
+        // Set cooldown to prevent false crossings from the warp destination
+        this._warpCooldownUntil = GLib.get_monotonic_time() + WARP_COOLDOWN_US;
         try {
             Clutter.get_default_backend().get_default_seat().warp_pointer(x, y);
             this._showVisualFeedback(x, y);
+            // Update tracking to warped position immediately
+            this._lastX = x;
+            this._lastY = y;
         } catch (e) {
             log(`[mouse-warp] warp error: ${e.message}`);
-            this._skipWarpEvent = false;
+            this._warpCooldownUntil = 0;
         }
     }
 
@@ -372,26 +389,31 @@ export default class MouseWarpExtension extends Extension {
         }
     }
 
-    // ── Event handler ────────────────────────────────────────────────
+    // ── Polled motion handler ─────────────────────────────────────
 
-    _onMotion() {
+    _onPoll() {
         if (!this._isEnabled) {
             this._resetMotionState();
             return;
         }
 
-        if (this._skipWarpEvent) {
-            this._skipWarpEvent = false;
-            const [sx, sy] = global.get_pointer();
-            this._lastX = sx;
-            this._lastY = sy;
+        const [x, y] = global.get_pointer();
+
+        // Skip if cursor hasn't moved AND no active pressure timer
+        if (x === this._lastX && y === this._lastY && this._pressureStartTime === 0)
+            return;
+
+        // During warp cooldown, just track position
+        if (GLib.get_monotonic_time() < this._warpCooldownUntil) {
+            this._lastX = x;
+            this._lastY = y;
+            this._pressureStartTime = 0;
             return;
         }
 
-        const [x, y] = global.get_pointer();
         const monitors = Main.layoutManager.monitors;
 
-        // Debug overlay + label (runs regardless of warp toggle or monitor count)
+        // Debug overlay + label (runs on ALL monitors now!)
         if (this._overlayEnabled) {
             this._updateOverlay(x, y);
             this._updateDebugLabel(x, y);
@@ -403,7 +425,7 @@ export default class MouseWarpExtension extends Extension {
             return;
         }
 
-        // ── Warp logic (can be independently disabled) ──
+        // ── Warp logic ──
         if (this._warpEnabled) {
             // Boundary crossing: detect row change via live geometry
             if (this._lastY >= 0) {
@@ -424,9 +446,10 @@ export default class MouseWarpExtension extends Extension {
                                 `x=${sourceX}->${newX}`);
                             if (Math.abs(newX - x) > 1)
                                 this._warp(newX, y);
-                            const [px, py] = global.get_pointer();
-                            this._lastX = px;
-                            this._lastY = py;
+                            else {
+                                this._lastX = x;
+                                this._lastY = y;
+                            }
                             this._pressureStartTime = 0;
                             return;
                         }
