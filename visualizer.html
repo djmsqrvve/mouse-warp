@@ -2,382 +2,535 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Mouse Warp Visualizer — Monitor Layout & Cursor Mapping</title>
+<title>Mouse Warp Visualizer — Physical + OS Layout</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0f; color: #ccc; font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px; }
-  h1 { text-align: center; font-size: 24px; margin-bottom: 4px; color: #fff; }
-  .subtitle { text-align: center; color: #666; font-size: 13px; margin-bottom: 20px; }
-  .controls { display: flex; gap: 12px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
-  .controls button { padding: 8px 16px; border: 1px solid #333; background: #1a1a2e; color: #ccc; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  body { background: #0a0a0f; color: #ccc; font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px; }
+  h1 { text-align: center; font-size: 22px; margin-bottom: 2px; color: #fff; }
+  .subtitle { text-align: center; color: #555; font-size: 12px; margin-bottom: 14px; }
+
+  .tabs { display: flex; gap: 0; justify-content: center; margin-bottom: 14px; }
+  .tabs button { padding: 10px 28px; border: 1px solid #333; background: #1a1a2e; color: #888; font-size: 14px; cursor: pointer; transition: all 0.15s; font-weight: 600; }
+  .tabs button:first-child { border-radius: 8px 0 0 8px; }
+  .tabs button:last-child { border-radius: 0 8px 8px 0; }
+  .tabs button.active { background: #4a3570; border-color: #8b5cf6; color: #fff; }
+
+  .controls { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .controls button { padding: 6px 14px; border: 1px solid #333; background: #1a1a2e; color: #aaa; border-radius: 5px; cursor: pointer; font-size: 12px; }
   .controls button.active { background: #4a3570; border-color: #8b5cf6; color: #fff; }
-  .controls button:hover { border-color: #666; }
-  .layout-container { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; }
-  .layout-panel { flex: 1; min-width: 400px; max-width: 700px; }
-  .layout-panel h2 { font-size: 16px; margin-bottom: 8px; text-align: center; }
-  .layout-panel .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; display: inline-block; margin-left: 8px; }
-  .tag.current { background: #ef444430; color: #ef4444; }
-  .tag.fixed { background: #22c55e30; color: #22c55e; }
-  .canvas-wrap { position: relative; background: #111; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
-  canvas { display: block; }
-  .info-panel { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1400px; margin-left: auto; margin-right: auto; }
-  .info-card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 16px; }
-  .info-card h3 { font-size: 14px; color: #fff; margin-bottom: 8px; }
-  .info-card p { font-size: 12px; color: #999; line-height: 1.6; }
-  .info-card code { background: #222; padding: 1px 6px; border-radius: 3px; font-size: 11px; color: #8b5cf6; }
-  .legend { display: flex; gap: 16px; justify-content: center; margin: 12px 0; flex-wrap: wrap; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #999; }
-  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-  .monitor-info { position: absolute; font-size: 10px; color: #888; pointer-events: none; text-align: center; }
-  .formula { text-align: center; margin: 16px 0; padding: 12px; background: #161616; border: 1px solid #222; border-radius: 8px; font-family: monospace; font-size: 13px; max-width: 700px; margin-left: auto; margin-right: auto; }
-  .formula .accent { color: #8b5cf6; }
-  .formula .green { color: #22c55e; }
-  .formula .red { color: #ef4444; }
+
+  .legend { display: flex; gap: 14px; justify-content: center; margin: 8px 0; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  .canvas-wrap { position: relative; background: #111; border: 1px solid #222; border-radius: 8px; overflow: hidden; max-width: 1200px; margin: 0 auto; }
+  canvas { display: block; width: 100%; cursor: default; }
+
+  .status-panel { margin: 14px auto; max-width: 1200px; background: #111; border: 1px solid #222; border-radius: 8px; font-family: monospace; font-size: 12px; overflow: hidden; }
+  .status-row { display: flex; border-bottom: 1px solid #1a1a1a; }
+  .status-row:last-child { border-bottom: none; }
+  .status-label { width: 90px; padding: 6px 10px; color: #555; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #0d0d12; flex-shrink: 0; display: flex; align-items: center; }
+  .status-value { padding: 6px 10px; color: #ccc; flex: 1; font-size: 12px; }
+  .dim { color: #333; }
+  .sv-green { color: #22c55e; } .sv-blue { color: #3b82f6; } .sv-orange { color: #f97316; }
+  .sv-red { color: #ef4444; } .sv-purple { color: #8b5cf6; } .sv-white { color: #fff; }
+
+  .info-panel { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; max-width: 1200px; margin-left: auto; margin-right: auto; }
+  .info-card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 14px; }
+  .info-card h3 { font-size: 13px; color: #fff; margin-bottom: 6px; }
+  .info-card p { font-size: 11px; color: #888; line-height: 1.5; }
+  .info-card code { background: #222; padding: 1px 5px; border-radius: 3px; font-size: 10px; color: #8b5cf6; }
+  .settings-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #1a1a1a; }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-label { color: #666; font-size: 11px; }
+  .settings-value { color: #8b5cf6; font-size: 11px; font-family: monospace; }
 </style>
 </head>
 <body>
 
 <h1>Mouse Warp Visualizer</h1>
-<p class="subtitle">Interactive monitor layout & cursor mapping preview</p>
+<p class="subtitle">Physical room layout vs. OS pixel grid — see how your real setup maps to GNOME's understanding</p>
 
-<div class="controls">
-  <button id="btn-current" class="active" onclick="setLayout('current')">Current Layout (Centered TV)</button>
-  <button id="btn-fixed" onclick="setLayout('fixed')">Fixed Layout (Flush-Left TV)</button>
-  <button id="btn-toggle-zones" onclick="toggleZones()">Toggle Dead Zones</button>
-  <button id="btn-toggle-warp" onclick="toggleWarp()">Toggle Warp Lines</button>
+<div class="tabs">
+  <button id="tab-physical" class="active" onclick="setTab('physical')">Physical Layout</button>
+  <button id="tab-os" onclick="setTab('os')">OS Interpretation</button>
+</div>
+
+<div class="controls" id="os-controls" style="display:none">
+  <button id="btn-zones" class="active" onclick="toggleOS('zones')">Dead Zones</button>
+  <button id="btn-warp" class="active" onclick="toggleOS('warp')">Warp Lines</button>
+  <button id="btn-split" class="active" onclick="toggleOS('split')">TV Split</button>
+</div>
+<div class="controls" id="phys-controls">
+  <span style="color:#555; font-size:12px">Drag monitors to match your IRL setup</span>
 </div>
 
 <div class="legend">
-  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>DP-1 (Right, Primary, 170Hz)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>DP-3 (Left, 60Hz)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>HDMI-1 (TV, 1080p)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#ef444460"></div>Dead Zone</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf660"></div>Warp Mapping</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>DP-1 (Right, 27")</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>DP-3 (Left, 27")</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>HDMI-1 (TV, 50")</div>
 </div>
 
-<div class="layout-container">
-  <div class="layout-panel">
-    <div class="canvas-wrap">
-      <canvas id="canvas" width="680" height="380"></canvas>
-    </div>
-  </div>
+<div class="canvas-wrap">
+  <canvas id="canvas"></canvas>
 </div>
 
-<div class="formula" id="formula-display">
-  Move your mouse over the layout to see cursor mapping
+<div class="status-panel">
+  <div class="status-row"><div class="status-label">Cursor</div><div class="status-value" id="st-cursor"><span class="dim">Hover over a monitor</span></div></div>
+  <div class="status-row"><div class="status-label">Zone</div><div class="status-value" id="st-zone"><span class="dim">&mdash;</span></div></div>
+  <div class="status-row"><div class="status-label">If Down</div><div class="status-value" id="st-down"><span class="dim">&mdash;</span></div></div>
+  <div class="status-row"><div class="status-label">If Up</div><div class="status-value" id="st-up"><span class="dim">&mdash;</span></div></div>
+  <div class="status-row"><div class="status-label">Dead Zone</div><div class="status-value" id="st-dead"><span class="dim">&mdash;</span></div></div>
+  <div class="status-row"><div class="status-label">PPI</div><div class="status-value" id="st-ppi"><span class="dim">&mdash;</span></div></div>
 </div>
 
 <div class="info-panel">
   <div class="info-card">
-    <h3>Problem A: Dead Zones</h3>
-    <p>When the TV (1920px wide) sits above two 1440p monitors (5120px combined), only the overlapping
-    region allows cursor crossing. The edges outside the TV's width are <strong>dead zones</strong> —
-    the cursor hits an invisible wall.</p>
-    <p style="margin-top:8px"><strong>Mouse Warp fix:</strong> Detects cursor pressure at dead zone edges,
-    then warps proportionally: <code>ratio = (x - srcLeft) / srcWidth</code> →
-    <code>newX = tgtLeft + ratio * tgtWidth</code></p>
+    <h3>Physical vs Pixel</h3>
+    <p>Your TV is 50" but only 1920px wide = <strong>38 px/inch</strong>.</p>
+    <p style="margin-top:4px">Your desk monitors are 27" but 2560px = <strong>95 px/inch</strong>.</p>
+    <p style="margin-top:4px">Moving 1 inch on the TV covers 2.5x fewer pixels than 1 inch on the desk monitors. Mouse-warp corrects for this.</p>
   </div>
   <div class="info-card">
-    <h3>Problem B: Cursor Click Offset</h3>
-    <p>On Wayland + NVIDIA, when the logical monitor origin is non-zero (TV at x=1591 instead of x=0),
-    clicks can land several pixels away from the visible cursor tip.</p>
-    <p style="margin-top:8px"><strong>Fix:</strong> Position TV at <code>(0, 0)</code> flush-left.
-    Run <code>dj video layout 3</code> to apply, then restart Wayland session.</p>
+    <h3>Why It Feels Wrong</h3>
+    <p>When you move your mouse down from the TV, the OS doesn't know your TV is physically wider than your desk monitors. It only sees pixels.</p>
+    <p style="margin-top:4px">Without warp: right side of TV &rarr; middle of DP-3 (wrong). With warp: right side of TV &rarr; DP-1 (correct).</p>
   </div>
-  <div class="info-card">
-    <h3>Current State</h3>
-    <p>TV at <code>x=1591</code> (centered). Dead zones exist on both sides.
-    Mouse Warp extension installed but cursor offset not yet fixed.</p>
-    <p style="margin-top:8px">Switch to "Fixed Layout" above to see how flush-left positioning
-    eliminates the offset and creates predictable warp zones.</p>
-  </div>
-  <div class="info-card">
-    <h3>Warp Formula</h3>
-    <p>Proportional mapping ensures the <strong>full width</strong> of one row maps to the full width of another:</p>
-    <p style="margin-top:8px; font-family: monospace; font-size: 12px;">
-      <code>ratio</code> = (cursorX - sourceRowLeft) / sourceRowWidth<br>
-      <code>newX</code> = targetRowLeft + ratio * targetRowWidth
-    </p>
-    <p style="margin-top:8px">Example: cursor at 50% of TV → warps to 50% of bottom row (x=2560)</p>
+  <div class="info-card" id="settings-card">
+    <h3>Extension Settings</h3>
+    <div>
+      <div class="settings-row"><span class="settings-label">edge-tolerance</span><span class="settings-value" id="s-edge">2px</span></div>
+      <div class="settings-row"><span class="settings-label">pressure-threshold</span><span class="settings-value" id="s-pressure">150ms</span></div>
+      <div class="settings-row"><span class="settings-label">warp-enabled</span><span class="settings-value" id="s-warp">true</span></div>
+      <div class="settings-row"><span class="settings-label">overlay-enabled</span><span class="settings-value" id="s-overlay">false</span></div>
+      <div class="settings-row"><span class="settings-label">click-flash</span><span class="settings-value" id="s-click">false</span></div>
+    </div>
   </div>
 </div>
 
 <script>
-const SCALE = 0.12;
-const PAD = 20;
+const SETTINGS = window.MOUSE_WARP_SETTINGS || {};
 
-const LAYOUTS = {
-  current: {
-    label: "Current (Centered TV)",
-    monitors: [
-      { name: "HDMI-1 (TV)", x: 1591, y: 0, w: 1920, h: 1080, color: "#f97316", hz: "60Hz" },
-      { name: "DP-3 (Left)", x: 0, y: 1080, w: 2560, h: 1440, color: "#22c55e", hz: "60Hz" },
-      { name: "DP-1 (Right)", x: 2560, y: 1080, w: 2560, h: 1440, color: "#3b82f6", hz: "170Hz", primary: true },
-    ]
-  },
-  fixed: {
-    label: "Fixed (Flush-Left TV)",
-    monitors: [
-      { name: "HDMI-1 (TV)", x: 0, y: 0, w: 1920, h: 1080, color: "#f97316", hz: "60Hz" },
-      { name: "DP-3 (Left)", x: 0, y: 1080, w: 2560, h: 1440, color: "#22c55e", hz: "60Hz" },
-      { name: "DP-1 (Right)", x: 2560, y: 1080, w: 2560, h: 1440, color: "#3b82f6", hz: "170Hz", primary: true },
-    ]
-  }
-};
+// ── Monitor data (both pixel and physical) ──
+const MONITORS = [
+  { id: 'hdmi1', name: 'HDMI-1 (TV)', px: { x:0, y:0, w:1920, h:1080 }, color: '#f97316', hz: '60Hz',
+    phys: { wIn: 44, hIn: 25, wallX: 8, wallY: 55 } },
+  { id: 'dp3', name: 'DP-3 (Left)', px: { x:0, y:1080, w:2560, h:1440 }, color: '#22c55e', hz: '60Hz',
+    phys: { wIn: 24, hIn: 13, wallX: 12, wallY: 22 } },
+  { id: 'dp1', name: 'DP-1 (Right)', px: { x:2560, y:1080, w:2560, h:1440 }, color: '#3b82f6', hz: '170Hz', primary: true,
+    phys: { wIn: 24, hIn: 13, wallX: 38, wallY: 22 } },
+];
 
-let activeLayout = 'current';
-let showZones = true;
-let showWarp = true;
+// Apply injected settings
+if (SETTINGS.settings) {
+  const s = SETTINGS.settings;
+  const el = (id, v) => { const e = document.getElementById(id); if (e && v !== undefined) e.textContent = v; };
+  el('s-edge', (s['edge-tolerance'] ?? 2) + 'px');
+  el('s-pressure', (s['pressure-threshold-ms'] ?? 150) + 'ms');
+  el('s-warp', String(s['warp-enabled'] ?? true));
+  el('s-overlay', String(s['overlay-enabled'] ?? false));
+  el('s-click', String(s['click-flash-enabled'] ?? false));
+}
+
+// ── Derived pixel geometry ──
+const TV = MONITORS[0], BL = MONITORS[1], BR = MONITORS[2];
+const BRL = 0, BRR = BL.px.w + BR.px.w, BRW = BRR;
+const BY = TV.px.h;
+const DP3R = BL.px.x + BL.px.w;
+const SPLIT = DP3R / BRW;
+const TV_SPLIT = TV.px.x + SPLIT * TV.px.w;
+
+// ── Canvas ──
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const DPR = window.devicePixelRatio || 1;
+let CW, CH, SCALE, PAD;
+let activeTab = 'physical';
+let osShow = { zones: true, warp: true, split: true };
+let dragging = null, dragOff = { x: 0, y: 0 };
 
-function setLayout(key) {
-  activeLayout = key;
-  document.getElementById('btn-current').classList.toggle('active', key === 'current');
-  document.getElementById('btn-fixed').classList.toggle('active', key === 'fixed');
-  draw();
+function setTab(t) {
+  activeTab = t;
+  document.getElementById('tab-physical').classList.toggle('active', t === 'physical');
+  document.getElementById('tab-os').classList.toggle('active', t === 'os');
+  document.getElementById('os-controls').style.display = t === 'os' ? 'flex' : 'none';
+  document.getElementById('phys-controls').style.display = t === 'physical' ? 'flex' : 'none';
+  resizeCanvas();
 }
 
-function toggleZones() { showZones = !showZones; draw(); }
-function toggleWarp() { showWarp = !showWarp; draw(); }
+function toggleOS(k) { osShow[k] = !osShow[k]; document.getElementById('btn-' + k).classList.toggle('active', osShow[k]); render(); }
 
-function toCanvas(x, y) {
-  return [PAD + x * SCALE, PAD + y * SCALE];
+function resizeCanvas() {
+  const wrap = canvas.parentElement;
+  CW = wrap.getBoundingClientRect().width;
+  PAD = 30;
+  if (activeTab === 'os') {
+    SCALE = (CW - PAD * 2) / BRR;
+    CH = (BY + BL.px.h) * SCALE + PAD * 2;
+  } else {
+    SCALE = (CW - PAD * 2) / 72; // 72 inches wide wall
+    CH = 80 * SCALE + PAD * 2; // 80 inches tall
+  }
+  canvas.width = CW * DPR;
+  canvas.height = CH * DPR;
+  canvas.style.height = CH + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  render();
 }
 
-function fromCanvas(cx, cy) {
-  return [(cx - PAD) / SCALE, (cy - PAD) / SCALE];
+function toC(x, y) { return [PAD + x * SCALE, PAD + y * SCALE]; }
+function fromC(cx, cy) { return [(cx - PAD) / SCALE, (cy - PAD) / SCALE]; }
+
+function render(mouse) {
+  ctx.clearRect(0, 0, CW, CH);
+  if (activeTab === 'physical') drawPhysical(mouse);
+  else drawOS(mouse);
 }
 
-function draw(mouseLogical) {
-  const layout = LAYOUTS[activeLayout];
-  const monitors = layout.monitors;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+// ═══════════════════════════════════════════════════
+// Physical Layout
+// ═══════════════════════════════════════════════════
 
-  // Background grid
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 0.5;
-  for (let x = 0; x < canvas.width; x += 30) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-  for (let y = 0; y < canvas.height; y += 30) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-  }
+function drawPhysical(mouse) {
+  // Grid
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.5;
+  for (let x = 0; x < CW; x += SCALE * 6) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke(); }
+  for (let y = 0; y < CH; y += SCALE * 6) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke(); }
 
-  // Dead zones (areas in bottom row not covered by top row)
-  if (showZones) {
-    const tv = monitors.find(m => m.name.includes('HDMI'));
-    const bottomLeft = monitors.find(m => m.name.includes('DP-3'));
-    const bottomRight = monitors.find(m => m.name.includes('DP-1'));
-    if (tv && bottomLeft) {
-      const bottomRowLeft = Math.min(bottomLeft.x, bottomRight.x);
-      const bottomRowRight = Math.max(bottomLeft.x + bottomLeft.w, bottomRight.x + bottomRight.w);
-      const tvLeft = tv.x;
-      const tvRight = tv.x + tv.w;
+  // Desk surface
+  const [dx, dy] = toC(0, 18);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(dx, dy, 72 * SCALE, 2 * SCALE);
+  ctx.fillStyle = '#333';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('desk surface', PAD + 36 * SCALE, dy + 1.2 * SCALE);
 
-      // Left dead zone
-      if (tvLeft > bottomRowLeft) {
-        const [dx, dy] = toCanvas(bottomRowLeft, bottomLeft.y - 3);
-        const dw = (tvLeft - bottomRowLeft) * SCALE;
-        ctx.fillStyle = '#ef444425';
-        ctx.fillRect(dx, dy, dw, 3 * SCALE);
-        ctx.fillStyle = '#ef444460';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('DEAD ZONE', dx + dw/2, dy + 1.5 * SCALE + 3);
-      }
-
-      // Right dead zone
-      if (tvRight < bottomRowRight) {
-        const [dx, dy] = toCanvas(tvRight, bottomLeft.y - 3);
-        const dw = (bottomRowRight - tvRight) * SCALE;
-        ctx.fillStyle = '#ef444425';
-        ctx.fillRect(dx, dy, dw, 3 * SCALE);
-        ctx.fillStyle = '#ef444460';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('DEAD ZONE', dx + dw/2, dy + 1.5 * SCALE + 3);
-      }
-    }
-  }
-
-  // Warp mapping lines
-  if (showWarp) {
-    const tv = monitors.find(m => m.name.includes('HDMI'));
-    const bottomLeft = monitors.find(m => m.name.includes('DP-3'));
-    const bottomRight = monitors.find(m => m.name.includes('DP-1'));
-    if (tv && bottomLeft && bottomRight) {
-      const bottomRowLeft = 0;
-      const bottomRowRight = bottomLeft.w + bottomRight.w;
-      const tvLeft = tv.x;
-      const tvRight = tv.x + tv.w;
-      const boundary = tv.y + tv.h;
-
-      // Draw proportional mapping lines
-      for (let pct = 0; pct <= 1; pct += 0.25) {
-        const tvX = tvLeft + pct * tv.w;
-        const bottomX = bottomRowLeft + pct * bottomRowRight;
-        const [cx1, cy1] = toCanvas(tvX, boundary);
-        const [cx2, cy2] = toCanvas(bottomX, boundary);
-        ctx.strokeStyle = '#8b5cf630';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(cx1, cy1 - 5);
-        ctx.lineTo(cx2, cy2 + 5);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Percentage labels
-        ctx.fillStyle = '#8b5cf680';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${Math.round(pct*100)}%`, cx1, cy1 - 8);
-      }
-    }
-  }
+  // Wall label
+  ctx.fillStyle = '#222';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('wall (front view from chair)', PAD + 2, PAD + 78 * SCALE);
 
   // Draw monitors
-  for (const mon of monitors) {
-    const [x, y] = toCanvas(mon.x, mon.y);
-    const w = mon.w * SCALE;
-    const h = mon.h * SCALE;
+  for (const mon of MONITORS) {
+    const p = mon.phys;
+    const [mx, my] = toC(p.wallX, 80 - p.wallY - p.hIn); // flip Y so higher = higher on wall
+    const mw = p.wIn * SCALE;
+    const mh = p.hIn * SCALE;
 
     // Fill
-    ctx.fillStyle = mon.color + '15';
-    ctx.fillRect(x, y, w, h);
-
+    ctx.fillStyle = mon.color + '18';
+    ctx.fillRect(mx, my, mw, mh);
     // Border
-    ctx.strokeStyle = mon.color + '80';
+    ctx.strokeStyle = mon.color + 'aa';
     ctx.lineWidth = mon.primary ? 2 : 1;
-    ctx.strokeRect(x, y, w, h);
+    ctx.strokeRect(mx, my, mw, mh);
 
     // Label
     ctx.fillStyle = mon.color;
     ctx.font = 'bold 11px system-ui';
     ctx.textAlign = 'center';
-    ctx.fillText(mon.name, x + w/2, y + h/2 - 6);
-
-    // Resolution + Hz
-    ctx.fillStyle = '#888';
+    ctx.fillText(mon.name, mx + mw / 2, my + mh / 2 - 10);
+    // Physical size
+    ctx.fillStyle = '#999';
     ctx.font = '10px monospace';
-    ctx.fillText(`${mon.w}x${mon.h} @ ${mon.hz}`, x + w/2, y + h/2 + 8);
-
-    // Position
-    ctx.fillStyle = '#555';
+    ctx.fillText(`${p.wIn}" x ${p.hIn}"`, mx + mw / 2, my + mh / 2 + 4);
+    // Resolution + PPI
+    const ppi = Math.round(Math.sqrt(mon.px.w ** 2 + mon.px.h ** 2) / Math.sqrt(p.wIn ** 2 + p.hIn ** 2));
+    ctx.fillStyle = '#666';
     ctx.font = '9px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`(${mon.x}, ${mon.y})`, x + 4, y + h - 4);
+    ctx.fillText(`${mon.px.w}x${mon.px.h} @ ${ppi} ppi`, mx + mw / 2, my + mh / 2 + 16);
+
+    if (mon.primary) {
+      ctx.fillStyle = mon.color + '60';
+      ctx.font = '8px system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText('PRIMARY', mx + mw - 3, my + 10);
+    }
   }
 
-  // Cursor position
-  if (mouseLogical) {
-    const [mx, my] = mouseLogical;
-    const [cx, cy] = toCanvas(mx, my);
+  // Cursor + mapping
+  if (mouse) {
+    const [mx, my] = mouse; // physical inches
+    const [cx, cy] = toC(mx, my);
 
-    // Find which monitor the cursor is on
-    let onMonitor = null;
-    for (const mon of monitors) {
-      if (mx >= mon.x && mx < mon.x + mon.w && my >= mon.y && my < mon.y + mon.h) {
-        onMonitor = mon;
+    // Find which physical monitor
+    let onMon = null;
+    for (const mon of MONITORS) {
+      const p = mon.phys;
+      const py = 80 - p.wallY - p.hIn;
+      if (mx >= p.wallX && mx < p.wallX + p.wIn && my >= py && my < py + p.hIn) {
+        onMon = mon;
         break;
       }
     }
 
-    // Cursor crosshair
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
+    // Crosshair
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy);
     ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8);
     ctx.stroke();
 
-    // Cursor dot
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fill();
+    if (onMon) {
+      const p = onMon.phys;
+      const py = 80 - p.wallY - p.hIn;
+      const ratioX = (mx - p.wallX) / p.wIn;
+      const ratioY = (my - py) / p.hIn;
+      const pixX = Math.round(onMon.px.x + ratioX * onMon.px.w);
+      const pixY = Math.round(onMon.px.y + ratioY * onMon.px.h);
 
-    // Show warp target if at boundary
-    const tv = monitors.find(m => m.name.includes('HDMI'));
-    const bottomLeft = monitors.find(m => m.name.includes('DP-3'));
-    const bottomRight = monitors.find(m => m.name.includes('DP-1'));
-    if (tv && bottomLeft && bottomRight) {
-      const bottomRowWidth = bottomLeft.w + bottomRight.w;
-      const boundary = tv.y + tv.h;
+      // Draw warp line to target if on TV
+      const isTV = onMon === TV;
+      const isBottom = onMon === BL || onMon === BR;
 
-      if (onMonitor === tv && Math.abs(my - boundary) < 30) {
-        // Show where it would warp to on the bottom row
-        const ratio = (mx - tv.x) / tv.w;
-        const targetX = ratio * bottomRowWidth;
-        const [tx, ty] = toCanvas(targetX, boundary + 20);
+      if (isTV) {
+        const downRatio = Math.max(0, Math.min(1, (pixX - TV.px.x) / TV.px.w));
+        const downTX = BRL + downRatio * BRW;
+        const targetMon = downTX < DP3R ? BL : BR;
+        const tPhys = targetMon.phys;
+        const tRatioX = (downTX - targetMon.px.x) / targetMon.px.w;
+        const tPhysX = tPhys.wallX + tRatioX * tPhys.wIn;
+        const tPhysY = 80 - tPhys.wallY - tPhys.hIn / 2;
+        const [tx, ty] = toC(tPhysX, tPhysY);
 
-        ctx.strokeStyle = '#8b5cf6';
+        ctx.strokeStyle = targetMon.color;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(tx, ty);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
         ctx.setLineDash([]);
-
-        ctx.fillStyle = '#8b5cf6';
-        ctx.beginPath();
-        ctx.arc(tx, ty, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        document.getElementById('formula-display').innerHTML =
-          `<span class="accent">ratio</span> = (${Math.round(mx)} - ${tv.x}) / ${tv.w} = <span class="green">${ratio.toFixed(3)}</span> → ` +
-          `<span class="accent">warpX</span> = 0 + ${ratio.toFixed(3)} * ${bottomRowWidth} = <span class="green">${Math.round(targetX)}</span>px`;
-      } else if (onMonitor && (onMonitor === bottomLeft || onMonitor === bottomRight) && Math.abs(my - boundary) < 30) {
-        // Show where it would warp to on the TV
-        const ratio = mx / bottomRowWidth;
-        const targetX = tv.x + ratio * tv.w;
-        const [tx, ty] = toCanvas(targetX, boundary - 20);
-
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(tx, ty);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        ctx.fillStyle = '#8b5cf6';
-        ctx.beginPath();
-        ctx.arc(tx, ty, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        document.getElementById('formula-display').innerHTML =
-          `<span class="accent">ratio</span> = ${Math.round(mx)} / ${bottomRowWidth} = <span class="green">${ratio.toFixed(3)}</span> → ` +
-          `<span class="accent">warpX</span> = ${tv.x} + ${ratio.toFixed(3)} * ${tv.w} = <span class="green">${Math.round(targetX)}</span>px`;
-      } else if (onMonitor) {
-        document.getElementById('formula-display').innerHTML =
-          `Cursor at <span class="accent">(${Math.round(mx)}, ${Math.round(my)})</span> on <span class="green">${onMonitor.name}</span>` +
-          ` — move near the boundary between rows to see warp mapping`;
-      } else {
-        document.getElementById('formula-display').innerHTML =
-          `Cursor at <span class="accent">(${Math.round(mx)}, ${Math.round(my)})</span> — <span class="red">outside monitor area</span>`;
+        ctx.fillStyle = targetMon.color;
+        ctx.beginPath(); ctx.arc(tx, ty, 4, 0, Math.PI * 2); ctx.fill();
       }
+
+      if (isBottom) {
+        const upRatio = Math.max(0, Math.min(1, (pixX - BRL) / BRW));
+        const upTX = TV.px.x + upRatio * TV.px.w;
+        const tRatioX = (upTX - TV.px.x) / TV.px.w;
+        const tPhysX = TV.phys.wallX + tRatioX * TV.phys.wIn;
+        const tPhysY = 80 - TV.phys.wallY - TV.phys.hIn / 2;
+        const [tx, ty] = toC(tPhysX, tPhysY);
+
+        ctx.strokeStyle = '#f97316';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath(); ctx.arc(tx, ty, 4, 0, Math.PI * 2); ctx.fill();
+      }
+
+      updateStatus(onMon, pixX, pixY);
+    } else {
+      resetStatus();
+      document.getElementById('st-cursor').innerHTML = `<span class="sv-white">(${Math.round(mx)}", ${Math.round(my)}")</span> <span class="dim">not on a monitor</span>`;
     }
   }
 }
 
+// ═══════════════════════════════════════════════════
+// OS Interpretation
+// ═══════════════════════════════════════════════════
+
+function drawOS(mouse) {
+  const S = SCALE;
+  // Grid
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.5;
+  for (let x = 0; x < CW; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke(); }
+  for (let y = 0; y < CH; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke(); }
+
+  // TV Split
+  if (osShow.split) {
+    const [slx, sly] = toC(TV.px.x, TV.px.y);
+    const splitW = TV_SPLIT * S, tvH = TV.px.h * S;
+    ctx.fillStyle = '#22c55e10'; ctx.fillRect(slx, sly, splitW, tvH);
+    const [srx] = toC(TV_SPLIT, TV.px.y);
+    const rightW = (TV.px.x + TV.px.w - TV_SPLIT) * S;
+    ctx.fillStyle = '#3b82f610'; ctx.fillRect(srx, sly, rightW, tvH);
+    ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(srx, sly); ctx.lineTo(srx, sly + tvH); ctx.stroke(); ctx.setLineDash([]);
+    ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#22c55e80'; ctx.fillText(`${Math.round(SPLIT * 100)}% → DP-3`, slx + splitW / 2, sly + tvH - 6);
+    ctx.fillStyle = '#3b82f680'; ctx.fillText(`${Math.round((1 - SPLIT) * 100)}% → DP-1`, srx + rightW / 2, sly + tvH - 6);
+  }
+
+  // Dead zones
+  if (osShow.zones) {
+    const tvR = TV.px.x + TV.px.w;
+    if (tvR < BRR) {
+      const [dx, dy] = toC(tvR, BY); const dw = (BRR - tvR) * S;
+      ctx.fillStyle = '#ef444418'; ctx.fillRect(dx, dy - 4 * S, dw, 8 * S);
+      ctx.fillStyle = '#ef444460'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('DEAD ZONE', dx + dw / 2, dy);
+    }
+  }
+
+  // Warp lines
+  if (osShow.warp) {
+    for (let p = 0; p <= 1; p += 0.125) {
+      const tvX = TV.px.x + p * TV.px.w, bX = BRL + p * BRW;
+      const [c1, y1] = toC(tvX, BY), [c2, y2] = toC(bX, BY);
+      ctx.strokeStyle = '#8b5cf618'; ctx.lineWidth = 0.8; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(c1, y1 - 2); ctx.lineTo(c2, y2 + 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  // Monitors
+  for (const mon of MONITORS) {
+    const [x, y] = toC(mon.px.x, mon.px.y);
+    const w = mon.px.w * S, h = mon.px.h * S;
+    ctx.fillStyle = mon.color + '10'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = mon.color + '80'; ctx.lineWidth = mon.primary ? 2 : 1; ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = mon.color; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(mon.name, x + w / 2, y + h / 2 - 6);
+    ctx.fillStyle = '#777'; ctx.font = '10px monospace';
+    ctx.fillText(`${mon.px.w}x${mon.px.h} @ ${mon.hz}`, x + w / 2, y + h / 2 + 8);
+    ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`(${mon.px.x}, ${mon.px.y})`, x + 3, y + h - 4);
+    if (mon.primary) { ctx.fillStyle = mon.color + '50'; ctx.font = '8px system-ui'; ctx.textAlign = 'right'; ctx.fillText('PRIMARY', x + w - 3, y + 10); }
+  }
+
+  // Boundary label
+  const [blx, bly] = toC(0, BY);
+  ctx.fillStyle = '#ffffff20'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+  ctx.fillText(`y=${BY}`, PAD + BRR * S + 28, bly + 3);
+
+  // Cursor
+  if (mouse) {
+    const [mx, my] = mouse;
+    const [cx, cy] = toC(mx, my);
+    let onMon = null;
+    for (const mon of MONITORS) {
+      if (mx >= mon.px.x && mx < mon.px.x + mon.px.w && my >= mon.px.y && my < mon.px.y + mon.px.h) { onMon = mon; break; }
+    }
+
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+
+    if (onMon) {
+      const isTV = onMon === TV, isBot = !isTV;
+      if (isTV) {
+        const r = Math.max(0, Math.min(1, (mx - TV.px.x) / TV.px.w));
+        const tX = BRL + r * BRW;
+        const [tx, ty] = toC(tX, BY + 20);
+        const tc = tX < DP3R ? '#22c55e' : '#3b82f6';
+        ctx.strokeStyle = tc; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = tc; ctx.beginPath(); ctx.arc(tx, ty, 4, 0, Math.PI * 2); ctx.fill();
+      } else {
+        const r = Math.max(0, Math.min(1, (mx - BRL) / BRW));
+        const tX = TV.px.x + r * TV.px.w;
+        const [tx, ty] = toC(tX, BY - 20);
+        ctx.strokeStyle = '#f97316'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.arc(tx, ty, 4, 0, Math.PI * 2); ctx.fill();
+      }
+      updateStatus(onMon, Math.round(mx), Math.round(my));
+    } else {
+      resetStatus();
+      document.getElementById('st-cursor').innerHTML = `<span class="sv-white">(${Math.round(mx)}, ${Math.round(my)})</span> <span class="sv-red">outside monitors</span>`;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// Shared status dashboard
+// ═══════════════════════════════════════════════════
+
+function updateStatus(mon, pixX, pixY) {
+  const isTV = mon === TV;
+  const isBot = mon === BL || mon === BR;
+  const tvCoversX = pixX >= TV.px.x && pixX < TV.px.x + TV.px.w;
+  const ppi = Math.round(Math.sqrt(mon.px.w ** 2 + mon.px.h ** 2) / Math.sqrt(mon.phys.wIn ** 2 + mon.phys.hIn ** 2));
+
+  document.getElementById('st-cursor').innerHTML =
+    `<span class="sv-white">(${pixX}, ${pixY})</span> on <span style="color:${mon.color}">${mon.name}</span>`;
+
+  if (isTV) {
+    document.getElementById('st-zone').innerHTML =
+      `<span class="sv-orange">TV row</span> &mdash; overlap with DP-3 below (x 0-1920)`;
+  } else if (tvCoversX) {
+    document.getElementById('st-zone').innerHTML =
+      `<span style="color:${mon.color}">Bottom row</span> &mdash; <span class="sv-orange">overlap</span> (TV directly above)`;
+  } else {
+    document.getElementById('st-zone').innerHTML =
+      `<span style="color:${mon.color}">Bottom row</span> &mdash; <span class="sv-red">dead zone</span> (no monitor above)`;
+  }
+
+  if (isTV) {
+    const r = Math.max(0, Math.min(1, (pixX - TV.px.x) / TV.px.w));
+    const tX = Math.round(BRL + r * BRW);
+    const tMon = tX < DP3R ? 'DP-3' : 'DP-1';
+    const tc = tX < DP3R ? 'sv-green' : 'sv-blue';
+    document.getElementById('st-down').innerHTML =
+      `ratio=${r.toFixed(3)} &rarr; x=<span class="${tc}">${tX}</span> &rarr; <strong class="${tc}">${tMon}</strong>`;
+    document.getElementById('st-up').innerHTML = `<span class="dim">&mdash; already on top row</span>`;
+  } else {
+    const r = Math.max(0, Math.min(1, (pixX - BRL) / BRW));
+    const tX = Math.round(TV.px.x + r * TV.px.w);
+    document.getElementById('st-up').innerHTML =
+      `ratio=${r.toFixed(3)} &rarr; x=<span class="sv-orange">${tX}</span> &rarr; <strong class="sv-orange">TV</strong>` +
+      (tvCoversX ? ' <span class="dim">(overlap, remap)</span>' : ' <span class="dim">(dead zone, pressure warp)</span>');
+    document.getElementById('st-down').innerHTML = `<span class="dim">&mdash; already on bottom row</span>`;
+  }
+
+  document.getElementById('st-dead').innerHTML = (isBot && !tvCoversX)
+    ? `<span class="sv-red">Yes</span> &mdash; x=${pixX}, TV covers [${TV.px.x}, ${TV.px.x + TV.px.w})`
+    : `<span class="sv-green">No</span>`;
+
+  document.getElementById('st-ppi').innerHTML =
+    `<span style="color:${mon.color}">${ppi} ppi</span> &mdash; ${mon.phys.wIn}" physical, ${mon.px.w}px logical`;
+}
+
+function resetStatus() {
+  for (const id of ['st-cursor', 'st-zone', 'st-down', 'st-up', 'st-dead', 'st-ppi'])
+    document.getElementById(id).innerHTML = '<span class="dim">&mdash;</span>';
+}
+
+// ═══════════════════════════════════════════════════
+// Drag + mouse events
+// ═══════════════════════════════════════════════════
+
 canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
-  const cx = e.clientX - rect.left;
-  const cy = e.clientY - rect.top;
-  const [lx, ly] = fromCanvas(cx, cy);
-  draw([lx, ly]);
+  const cx = (e.clientX - rect.left) * (canvas.width / DPR / rect.width);
+  const cy = (e.clientY - rect.top) * (canvas.height / DPR / rect.height);
+  const [lx, ly] = fromC(cx, cy);
+
+  if (dragging && activeTab === 'physical') {
+    dragging.phys.wallX = Math.max(0, lx - dragOff.x);
+    dragging.phys.wallY = Math.max(0, 80 - (ly + dragOff.y + dragging.phys.hIn));
+  }
+
+  render([lx, ly]);
 });
 
-canvas.addEventListener('mouseleave', () => {
-  draw();
-  document.getElementById('formula-display').innerHTML = 'Move your mouse over the layout to see cursor mapping';
+canvas.addEventListener('mousedown', (e) => {
+  if (activeTab !== 'physical') return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (canvas.width / DPR / rect.width);
+  const cy = (e.clientY - rect.top) * (canvas.height / DPR / rect.height);
+  const [lx, ly] = fromC(cx, cy);
+
+  for (const mon of MONITORS) {
+    const p = mon.phys;
+    const py = 80 - p.wallY - p.hIn;
+    if (lx >= p.wallX && lx < p.wallX + p.wIn && ly >= py && ly < py + p.hIn) {
+      dragging = mon;
+      dragOff = { x: lx - p.wallX, y: ly - py };
+      canvas.style.cursor = 'grabbing';
+      break;
+    }
+  }
 });
 
-draw();
+canvas.addEventListener('mouseup', () => { dragging = null; canvas.style.cursor = 'default'; });
+canvas.addEventListener('mouseleave', () => { dragging = null; canvas.style.cursor = 'default'; render(); resetStatus(); });
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 </script>
 </body>
 </html>

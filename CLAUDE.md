@@ -16,15 +16,17 @@ JavaScript (GJS/GNOME Shell Extension API), GSettings, Clutter, St.
 make install                                  # Compile schemas + copy to extensions dir
 make package                                  # Create .zip for distribution
 gnome-extensions enable mouse-warp@djmsqrvve  # Enable (requires re-login on Wayland)
-bash tests/run_tests.sh                       # Run 182 assertions (Node.js)
+bash tests/run_tests.sh                       # Run 190 assertions (Node.js)
 docker compose run tests                      # Run tests in container
 
 # Via dj CLI
 dj mouse warp on          # Enable extension
 dj mouse warp off         # Disable extension
 dj mouse warp status      # Show extension state
-dj mouse warp visualize   # Open interactive layout visualizer
+dj mouse warp visualize   # Open visualizer with live settings injected
+dj mouse warp reload      # make install + logout (fast debug cycle)
 dj mouse status           # Full mouse config + warp state
+dj session logout         # Log out GNOME session
 ```
 
 ## How It Works
@@ -39,12 +41,12 @@ Formula: `ratio = (x - srcLeft) / srcWidth` → `newX = tgtLeft + ratio * tgtWid
 ## Architecture
 
 ```
-extension.js       # Core: enable/disable, live geometry, motion handler, warp
-prefs.js           # GTK4/Adwaita preferences window (3 settings)
+extension.js       # Core: warp, overlay, click flash, debug label, live geometry
+prefs.js           # GTK4/Adwaita preferences (General + Debug Tools groups)
 metadata.json      # Extension UUID + GNOME Shell version compat (47-50)
-schemas/           # GSettings schema (edge-tolerance, pressure-threshold-ms, is-enabled)
-visualizer.html    # Interactive monitor layout preview (open in browser)
-tests/             # 182 assertions across 3 test files (Node.js)
+schemas/           # GSettings schema (7 keys: warp, overlay, click-flash, monitor-config, etc)
+visualizer.html    # Dual-tab visualizer: Physical Layout + OS Interpretation
+tests/             # 190 assertions across 3 test files (Node.js)
 ```
 
 ## Configuration
@@ -54,6 +56,10 @@ Settings via `gnome-extensions prefs mouse-warp@djmsqrvve` or GSettings:
 - `edge-tolerance` (default: 2px) — distance from edge that triggers dead-zone detection
 - `pressure-threshold-ms` (default: 150ms) — time cursor must push against edge before warping
 - `is-enabled` (default: true) — master toggle
+- `warp-enabled` (default: true) — toggle warp independently from debug tools
+- `overlay-enabled` (default: false) — per-monitor colored cursor circle
+- `click-flash-enabled` (default: false) — flash at true click position
+- `monitor-config` (JSON) — per-monitor overlay color/size + physical dimensions
 
 ## Monitor Layout
 
@@ -67,6 +73,7 @@ Layout applied via `dj video layout 3`. Persisted in `~/.config/monitors.xml`.
 
 ## Known Issues
 
-- Requires Wayland session restart after install/update
+- Requires Wayland session restart after install/update (use `dj mouse warp reload`)
+- Extension only receives motion events on primary monitor (DP-1) — Mutter/Wayland limitation under investigation
 - Only handles horizontal (top/bottom) boundaries, not left/right height mismatches
 - NVIDIA cursor hotspot fix: `MUTTER_DEBUG_FORCE_KMS_MODE=simple` in `~/.config/environment.d/60-nvidia-cursor.conf`

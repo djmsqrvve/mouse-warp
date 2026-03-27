@@ -16,5 +16,25 @@
       <summary>Enable Extension</summary>
       <description>Whether the mouse warp functionality is currently active.</description>
     </key>
+    <key name="warp-enabled" type="b">
+      <default>true</default>
+      <summary>Warp Enabled</summary>
+      <description>Whether the proportional warp logic is active (can be disabled to isolate debug visuals).</description>
+    </key>
+    <key name="overlay-enabled" type="b">
+      <default>false</default>
+      <summary>Overlay Enabled</summary>
+      <description>Show a colored circle following the cursor that changes color per monitor.</description>
+    </key>
+    <key name="click-flash-enabled" type="b">
+      <default>false</default>
+      <summary>Click Flash Enabled</summary>
+      <description>Flash a dot at the true click position on each button press.</description>
+    </key>
+    <key name="monitor-config" type="s">
+      <default>'{"0": {"color": "rgba(0,255,0,0.5)", "size": 20}, "1": {"color": "rgba(255,255,0,0.5)", "size": 20}, "2": {"color": "rgba(0,100,255,0.5)", "size": 20}}'</default>
+      <summary>Per-Monitor Config</summary>
+      <description>JSON mapping monitor index to overlay color and size.</description>
+    </key>
   </schema>
 </schemalist>

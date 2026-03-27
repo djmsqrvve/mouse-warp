@@ -103,7 +103,7 @@ assert(enabledBlock.includes('<description>'), 'is-enabled has <description>');
 console.log('\n── Key Count ──');
 
 const keyCount = (xml.match(/<key /g) || []).length;
-assertEqual(keyCount, 3, 'Schema contains exactly 3 keys');
+assertEqual(keyCount, 7, 'Schema contains exactly 7 keys');
 
 // ── Summary ─────────────────────────────────────────────────────────
 console.log(`\n═══ Schema Tests: ${passed} passed, ${failed} failed ═══\n`);

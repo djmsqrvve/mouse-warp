@@ -14,11 +14,12 @@
  *      maps to the full width of the other.
  *
  * All geometry is computed live from Main.layoutManager.monitors on every
- * motion event — no pre-built boundary cache. This handles hot-plugged
- * monitors, resolution changes, and layout edits without requiring a restart.
+ * motion event — no pre-built boundary cache.
  *
- * The math: ratio = (sourceX - sourceLeft) / sourceWidth
- *           newX  = targetLeft + ratio * targetWidth
+ * Debug tools (toggle via prefs):
+ *   - Per-monitor colored cursor overlay — shows which monitor the extension sees
+ *   - Click flash — shows true click position
+ *   - Coordinate label — shows (x, y) and monitor index
  */
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -27,7 +28,6 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-// Tolerance for grouping monitors into the same row by Y coordinate
 const ROW_TOLERANCE = 5;
 
 export default class MouseWarpExtension extends Extension {
@@ -36,30 +36,44 @@ export default class MouseWarpExtension extends Extension {
         this._loadSettings();
 
         this._settingsChangedId = this._settings.connect('changed', () => {
+            const wasOverlay = this._overlayEnabled;
             this._loadSettings();
+            if (wasOverlay && !this._overlayEnabled) {
+                this._destroyOverlay();
+                this._destroyDebugLabel();
+            }
         });
 
         this._resetMotionState();
         this._feedbackWidgets = [];
+        this._overlayWidget = null;
+        this._overlayLastMonitor = -1;
+        this._debugLabel = null;
 
         this._stageEventId = global.stage.connect('captured-event', (_, event) => {
-            if (event.type() === Clutter.EventType.MOTION) {
+            const etype = event.type();
+            if (etype === Clutter.EventType.MOTION) {
                 try {
                     this._onMotion();
                 } catch (e) {
-                    // Never crash GNOME Shell — log and continue
                     log(`[mouse-warp] motion handler error: ${e.message}`);
+                }
+            } else if (etype === Clutter.EventType.BUTTON_PRESS) {
+                try {
+                    this._onButtonPress();
+                } catch (e) {
+                    log(`[mouse-warp] click handler error: ${e.message}`);
                 }
             }
             return Clutter.EVENT_PROPAGATE;
         });
 
-        // Reset motion state on layout changes to prevent stale crossings
         this._monitorsChangedId = Main.layoutManager.connect(
             'monitors-changed',
             () => {
                 this._resetMotionState();
-                log('[mouse-warp] monitors changed — motion state reset');
+                this._overlayLastMonitor = -1;
+                log('[mouse-warp] monitors changed — state reset');
             }
         );
 
@@ -70,6 +84,15 @@ export default class MouseWarpExtension extends Extension {
         this._edgeTolerance = this._settings.get_int('edge-tolerance');
         this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
         this._isEnabled = this._settings.get_boolean('is-enabled');
+        this._warpEnabled = this._settings.get_boolean('warp-enabled');
+        this._overlayEnabled = this._settings.get_boolean('overlay-enabled');
+        this._clickFlashEnabled = this._settings.get_boolean('click-flash-enabled');
+        try {
+            this._monitorConfig = JSON.parse(this._settings.get_string('monitor-config'));
+        } catch (e) {
+            log(`[mouse-warp] invalid monitor-config JSON: ${e.message}`);
+            this._monitorConfig = {};
+        }
         if (!this._isEnabled)
             this._resetMotionState();
     }
@@ -84,11 +107,13 @@ export default class MouseWarpExtension extends Extension {
     disable() {
         this._resetMotionState();
 
-        // Clean up any remaining feedback widgets
         for (const w of this._feedbackWidgets) {
             try { w.destroy(); } catch (_) {}
         }
         this._feedbackWidgets = [];
+
+        this._destroyOverlay();
+        this._destroyDebugLabel();
 
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
@@ -109,11 +134,6 @@ export default class MouseWarpExtension extends Extension {
 
     // ── Live geometry helpers ─────────────────────────────────────
 
-    /**
-     * Compute the horizontal span of the monitor row containing the given Y.
-     * Groups monitors within ROW_TOLERANCE of each other into the same row.
-     * Returns null if Y is not inside any monitor.
-     */
     _rowSpanAt(y, monitors) {
         let seedY = null;
         for (const m of monitors) {
@@ -132,13 +152,6 @@ export default class MouseWarpExtension extends Extension {
         return {left, right, width: right - left, top, bottom};
     }
 
-    /**
-     * Check if the cursor is in a dead zone — near the edge of its monitor
-     * with no direct neighbor above/below at this X, but an adjacent row
-     * exists at some other X range.
-     *
-     * Returns {sourceRow, targetRow, warpY} or null.
-     */
     _findDeadZone(x, y, monitors) {
         const curMon = monitors.find(m =>
             x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height);
@@ -189,6 +202,126 @@ export default class MouseWarpExtension extends Extension {
         }
 
         return null;
+    }
+
+    // ── Monitor identification ───────────────────────────────────
+
+    _getMonitorIndexAt(x, y) {
+        const monitors = Main.layoutManager.monitors;
+        for (let i = 0; i < monitors.length; i++) {
+            const m = monitors[i];
+            if (x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height)
+                return i;
+        }
+        return -1;
+    }
+
+    _getMonitorOverlayConfig(monitorIndex) {
+        const key = String(monitorIndex);
+        if (this._monitorConfig && this._monitorConfig[key])
+            return this._monitorConfig[key];
+        return {color: 'rgba(255,255,255,0.5)', size: 20};
+    }
+
+    // ── Visual debug tools ───────────────────────────────────────
+
+    _updateOverlay(x, y) {
+        try {
+            const monIdx = this._getMonitorIndexAt(x, y);
+            const cfg = this._getMonitorOverlayConfig(monIdx);
+            const size = cfg.size || 20;
+            const color = cfg.color || 'rgba(255,255,255,0.5)';
+
+            if (!this._overlayWidget) {
+                this._overlayWidget = new St.Widget({
+                    reactive: false,
+                    can_focus: false,
+                    width: size,
+                    height: size,
+                    style: `border-radius: ${size / 2}px; background-color: ${color};`,
+                });
+                Main.uiGroup.add_child(this._overlayWidget);
+            }
+
+            if (this._overlayLastMonitor !== monIdx) {
+                this._overlayLastMonitor = monIdx;
+                this._overlayWidget.set_size(size, size);
+                this._overlayWidget.style = `border-radius: ${size / 2}px; background-color: ${color};`;
+            }
+
+            this._overlayWidget.set_position(x - size / 2, y - size / 2);
+        } catch (e) {
+            log(`[mouse-warp] overlay error: ${e.message}`);
+        }
+    }
+
+    _destroyOverlay() {
+        if (this._overlayWidget) {
+            try { this._overlayWidget.destroy(); } catch (_) {}
+            this._overlayWidget = null;
+            this._overlayLastMonitor = -1;
+        }
+    }
+
+    _updateDebugLabel(x, y) {
+        try {
+            if (!this._debugLabel) {
+                this._debugLabel = new St.Label({
+                    style: 'font-size: 14px; color: white; background-color: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px;',
+                    reactive: false,
+                    can_focus: false,
+                });
+                Main.uiGroup.add_child(this._debugLabel);
+            }
+
+            const monIdx = this._getMonitorIndexAt(x, y);
+            this._debugLabel.set_text(`(${x}, ${y}) mon:${monIdx}`);
+
+            const primary = Main.layoutManager.primaryMonitor;
+            if (primary)
+                this._debugLabel.set_position(primary.x + 10, primary.y + 10);
+        } catch (e) {
+            log(`[mouse-warp] debug label error: ${e.message}`);
+        }
+    }
+
+    _destroyDebugLabel() {
+        if (this._debugLabel) {
+            try { this._debugLabel.destroy(); } catch (_) {}
+            this._debugLabel = null;
+        }
+    }
+
+    _onButtonPress() {
+        if (!this._isEnabled || !this._clickFlashEnabled) return;
+
+        const [x, y] = global.get_pointer();
+        const size = 8;
+        const widget = new St.Widget({
+            style: `border-radius: ${size / 2}px; background-color: rgba(255,255,255,0.9);`,
+            x: x - size / 2,
+            y: y - size / 2,
+            width: size,
+            height: size,
+            reactive: false,
+            can_focus: false,
+        });
+
+        Main.uiGroup.add_child(widget);
+        this._feedbackWidgets.push(widget);
+
+        widget.ease({
+            opacity: 0,
+            scale_x: 3.0,
+            scale_y: 3.0,
+            duration: 300,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => {
+                try { widget.destroy(); } catch (_) {}
+                const idx = this._feedbackWidgets.indexOf(widget);
+                if (idx >= 0) this._feedbackWidgets.splice(idx, 1);
+            },
+        });
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -247,7 +380,6 @@ export default class MouseWarpExtension extends Extension {
             return;
         }
 
-        // Skip the synthetic motion event generated by our own warp
         if (this._skipWarpEvent) {
             this._skipWarpEvent = false;
             const [sx, sy] = global.get_pointer();
@@ -259,64 +391,71 @@ export default class MouseWarpExtension extends Extension {
         const [x, y] = global.get_pointer();
         const monitors = Main.layoutManager.monitors;
 
+        // Debug overlay + label (runs regardless of warp toggle or monitor count)
+        if (this._overlayEnabled) {
+            this._updateOverlay(x, y);
+            this._updateDebugLabel(x, y);
+        }
+
         if (!monitors || monitors.length < 2) {
             this._lastX = x;
             this._lastY = y;
             return;
         }
 
-        // ── Boundary crossing: detect row change via live geometry ──
-        if (this._lastY >= 0) {
-            const srcRow = this._rowSpanAt(this._lastY, monitors);
-            const tgtRow = this._rowSpanAt(y, monitors);
+        // ── Warp logic (can be independently disabled) ──
+        if (this._warpEnabled) {
+            // Boundary crossing: detect row change via live geometry
+            if (this._lastY >= 0) {
+                const srcRow = this._rowSpanAt(this._lastY, monitors);
+                const tgtRow = this._rowSpanAt(y, monitors);
 
-            if (srcRow && tgtRow && srcRow.top !== tgtRow.top) {
-                // Different rows — remap if spans differ
-                if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
-                    Math.abs(srcRow.left - tgtRow.left) >= 2) {
-                    // Use _lastX (source position before GNOME moved the cursor)
-                    const sourceX = this._lastX;
-                    if (sourceX >= srcRow.left && sourceX < srcRow.right) {
-                        const ratio = Math.max(0, Math.min(1,
-                            (sourceX - srcRow.left) / srcRow.width));
-                        const newX = Math.round(
-                            tgtRow.left + ratio * (tgtRow.width - 1));
-                        log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
-                            `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
-                            `x=${sourceX}->${newX}`);
-                        if (Math.abs(newX - x) > 1)
-                            this._warp(newX, y);
-                        const [px, py] = global.get_pointer();
-                        this._lastX = px;
-                        this._lastY = py;
-                        this._pressureStartTime = 0;
-                        return;
+                if (srcRow && tgtRow && srcRow.top !== tgtRow.top) {
+                    if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
+                        Math.abs(srcRow.left - tgtRow.left) >= 2) {
+                        const sourceX = this._lastX;
+                        if (sourceX >= srcRow.left && sourceX < srcRow.right) {
+                            const ratio = Math.max(0, Math.min(1,
+                                (sourceX - srcRow.left) / srcRow.width));
+                            const newX = Math.round(
+                                tgtRow.left + ratio * (tgtRow.width - 1));
+                            log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
+                                `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
+                                `x=${sourceX}->${newX}`);
+                            if (Math.abs(newX - x) > 1)
+                                this._warp(newX, y);
+                            const [px, py] = global.get_pointer();
+                            this._lastX = px;
+                            this._lastY = py;
+                            this._pressureStartTime = 0;
+                            return;
+                        }
                     }
                 }
             }
-        }
 
-        // ── Dead zone: cursor stuck at edge with no direct neighbor ──
-        const deadZone = this._findDeadZone(x, y, monitors);
-        if (deadZone) {
-            if (this._pressureStartTime === 0) {
-                this._pressureStartTime = GLib.get_monotonic_time();
-            } else {
-                const elapsedMs =
-                    (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
-                if (elapsedMs > this._pressureThresholdMs) {
-                    const {sourceRow, targetRow, warpY} = deadZone;
-                    const ratio = Math.max(0, Math.min(1,
-                        (x - sourceRow.left) / sourceRow.width));
-                    const newX = Math.round(
-                        targetRow.left + ratio * (targetRow.width - 1));
-                    this._warp(newX, warpY);
-                    this._pressureStartTime = 0;
+            // Dead zone: cursor stuck at edge with no direct neighbor
+            const deadZone = this._findDeadZone(x, y, monitors);
+            if (deadZone) {
+                if (this._pressureStartTime === 0) {
+                    this._pressureStartTime = GLib.get_monotonic_time();
+                } else {
+                    const elapsedMs =
+                        (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
+                    if (elapsedMs > this._pressureThresholdMs) {
+                        const {sourceRow, targetRow, warpY} = deadZone;
+                        const ratio = Math.max(0, Math.min(1,
+                            (x - sourceRow.left) / sourceRow.width));
+                        const newX = Math.round(
+                            targetRow.left + ratio * (targetRow.width - 1));
+                        this._warp(newX, warpY);
+                        this._pressureStartTime = 0;
+                    }
                 }
+                this._lastX = x;
+                this._lastY = y;
+                return;
             }
-            this._lastX = x;
-            this._lastY = y;
-            return;
         }
 
         this._pressureStartTime = 0;

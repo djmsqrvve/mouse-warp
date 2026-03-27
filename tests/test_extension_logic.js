@@ -57,6 +57,10 @@ function resetMocks() {
         'edge-tolerance': 2,
         'pressure-threshold-ms': 150,
         'is-enabled': true,
+        'warp-enabled': true,
+        'overlay-enabled': false,
+        'click-flash-enabled': false,
+        'monitor-config': '{"0": {"color": "rgba(0,255,0,0.5)", "size": 20}}',
     };
     settingsListeners = {};
     uiGroupChildren = [];
@@ -99,6 +103,7 @@ function createMockSettings() {
     return {
         get_int: (key) => settingsStore[key],
         get_boolean: (key) => settingsStore[key],
+        get_string: (key) => settingsStore[key],
         set_boolean: (key, val) => { settingsStore[key] = val; },
         connect: (signal, cb) => { settingsListeners[++listenerId] = cb; return listenerId; },
         disconnect: (id) => { delete settingsListeners[id]; },
@@ -165,6 +170,14 @@ class TestableMouseWarp {
         this._edgeTolerance = this._settings.get_int('edge-tolerance');
         this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
         this._isEnabled = this._settings.get_boolean('is-enabled');
+        this._warpEnabled = this._settings.get_boolean('warp-enabled');
+        this._overlayEnabled = this._settings.get_boolean('overlay-enabled');
+        this._clickFlashEnabled = this._settings.get_boolean('click-flash-enabled');
+        try {
+            this._monitorConfig = JSON.parse(this._settings.get_string('monitor-config'));
+        } catch (e) {
+            this._monitorConfig = {};
+        }
         if (!this._isEnabled)
             this._resetMotionState();
     }
@@ -326,34 +339,36 @@ class TestableMouseWarp {
             return;
         }
 
-        // ── Boundary crossing: detect row change via live geometry ──
-        if (this._lastY >= 0) {
-            const srcRow = this._rowSpanAt(this._lastY, monitors);
-            const tgtRow = this._rowSpanAt(y, monitors);
+        // ── Warp logic (guarded by warp-enabled toggle) ──
+        if (this._warpEnabled) {
+            // Boundary crossing: detect row change via live geometry
+            if (this._lastY >= 0) {
+                const srcRow = this._rowSpanAt(this._lastY, monitors);
+                const tgtRow = this._rowSpanAt(y, monitors);
 
-            if (srcRow && tgtRow && srcRow.top !== tgtRow.top) {
-                if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
-                    Math.abs(srcRow.left - tgtRow.left) >= 2) {
-                    const sourceX = this._lastX;
-                    if (sourceX >= srcRow.left && sourceX < srcRow.right) {
-                        const ratio = Math.max(0, Math.min(1,
-                            (sourceX - srcRow.left) / srcRow.width));
-                        const newX = Math.round(
-                            tgtRow.left + ratio * (tgtRow.width - 1));
-                        if (Math.abs(newX - x) > 1)
-                            this._warp(newX, y);
-                        const [px, py] = mockGlobal.get_pointer();
-                        this._lastX = px;
-                        this._lastY = py;
-                        this._pressureStartTime = 0;
-                        return;
+                if (srcRow && tgtRow && srcRow.top !== tgtRow.top) {
+                    if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
+                        Math.abs(srcRow.left - tgtRow.left) >= 2) {
+                        const sourceX = this._lastX;
+                        if (sourceX >= srcRow.left && sourceX < srcRow.right) {
+                            const ratio = Math.max(0, Math.min(1,
+                                (sourceX - srcRow.left) / srcRow.width));
+                            const newX = Math.round(
+                                tgtRow.left + ratio * (tgtRow.width - 1));
+                            if (Math.abs(newX - x) > 1)
+                                this._warp(newX, y);
+                            const [px, py] = mockGlobal.get_pointer();
+                            this._lastX = px;
+                            this._lastY = py;
+                            this._pressureStartTime = 0;
+                            return;
+                        }
                     }
                 }
             }
-        }
 
-        // ── Dead zone: cursor stuck at edge with no direct neighbor ──
-        const deadZone = this._findDeadZone(x, y, monitors);
+            // Dead zone: cursor stuck at edge with no direct neighbor
+            const deadZone = this._findDeadZone(x, y, monitors);
         if (deadZone) {
             if (this._pressureStartTime === 0) {
                 this._pressureStartTime = mockGLib.get_monotonic_time();
@@ -374,6 +389,7 @@ class TestableMouseWarp {
             this._lastY = y;
             return;
         }
+        } // end if (this._warpEnabled)
 
         this._pressureStartTime = 0;
         this._lastX = x;
@@ -1062,6 +1078,72 @@ setupDualRowMonitors();
     // newX = 0 + 0.979 * 5119 = ~5013
     assertApprox(warpedTo.x, 5013, 3, 'Remap uses _lastX (2200) not current x (1500)');
     assert(warpedTo.x >= 2560, 'Right side of TV correctly maps to DP-1');
+
+    ext.disable();
+}
+
+// ── 17. warp-enabled Toggle ──────────────────────────────────────────
+
+console.log('\n\u2500\u2500 17. warp-enabled Toggle \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Disable warp but keep extension enabled
+    settingsStore['warp-enabled'] = false;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._warpEnabled, false, 'warpEnabled is false after settings change');
+
+    // Prime and cross boundary — should NOT warp
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1079;
+    ext._onMotion();
+
+    warpedTo = null;
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1080;
+    ext._onMotion();
+    assert(warpedTo === null, 'No warp when warp-enabled is false');
+
+    // lastY should still track (needed for overlay)
+    assertEqual(ext._lastY, 1080, 'lastY still tracks when warp disabled');
+    assertEqual(ext._lastX, 960, 'lastX still tracks when warp disabled');
+
+    // Re-enable warp — reset state to avoid stale crossing
+    settingsStore['warp-enabled'] = true;
+    for (const cb of Object.values(settingsListeners)) cb();
+    ext._lastX = 960;
+    ext._lastY = 1079;  // prime on upper row
+
+    warpedTo = null;
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1080;
+    ext._onMotion();
+    assert(warpedTo !== null, 'Warp works again after re-enabling');
+
+    ext.disable();
+}
+
+// ── 18. monitor-config Parsing ──────────────────────────────────────
+
+console.log('\n\u2500\u2500 18. monitor-config Parsing \u2500\u2500');
+
+resetMocks();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Valid config loaded
+    assert(ext._monitorConfig !== null, 'monitor-config parsed successfully');
+    assertEqual(ext._monitorConfig['0'].color, 'rgba(0,255,0,0.5)', 'Monitor 0 color is green');
+
+    // Invalid JSON falls back gracefully
+    settingsStore['monitor-config'] = 'not valid json';
+    for (const cb of Object.values(settingsListeners)) cb();
+    assert(typeof ext._monitorConfig === 'object', 'Invalid JSON falls back to empty object');
 
     ext.disable();
 }

@@ -5,18 +5,17 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 export default class MouseWarpPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        // Create a preferences page and group
         const page = new Adw.PreferencesPage();
+        const settings = this.getSettings('org.gnome.shell.extensions.mouse-warp');
+
+        // ── General Settings ──
         const group = new Adw.PreferencesGroup({
             title: 'General Settings',
             description: 'Configure Mouse Warp behavior',
         });
         page.add(group);
 
-        // Get the settings using the built-in helper method from ExtensionPreferences
-        const settings = this.getSettings('org.gnome.shell.extensions.mouse-warp');
-
-        // Edge Tolerance Row
+        // Edge Tolerance
         const edgeToleranceRow = new Adw.ActionRow({
             title: 'Edge Tolerance (px)',
             subtitle: 'Distance from the screen edge to trigger the warp',
@@ -27,7 +26,7 @@ export default class MouseWarpPreferences extends ExtensionPreferences {
         settings.bind('edge-tolerance', edgeToleranceScale.get_adjustment(), 'value', Gio.SettingsBindFlags.DEFAULT);
         group.add(edgeToleranceRow);
 
-        // Pressure Threshold Row
+        // Pressure Threshold
         const pressureThresholdRow = new Adw.ActionRow({
             title: 'Pressure Threshold (ms)',
             subtitle: 'Time cursor must push against the edge before warping',
@@ -38,19 +37,53 @@ export default class MouseWarpPreferences extends ExtensionPreferences {
         settings.bind('pressure-threshold-ms', pressureThresholdScale.get_adjustment(), 'value', Gio.SettingsBindFlags.DEFAULT);
         group.add(pressureThresholdRow);
 
-        // Enable Switch Row
+        // Master Enable
         const enableRow = new Adw.ActionRow({
             title: 'Enable Mouse Warp',
-            subtitle: 'Temporarily pause the warp functionality',
+            subtitle: 'Master toggle for all functionality',
         });
-        const enableSwitch = new Gtk.Switch({
-            valign: Gtk.Align.CENTER,
-        });
+        const enableSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
         settings.bind('is-enabled', enableSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
         enableRow.add_suffix(enableSwitch);
         group.add(enableRow);
 
-        // Add page to the preferences window
+        // ── Debug Tools ──
+        const debugGroup = new Adw.PreferencesGroup({
+            title: 'Debug Tools',
+            description: 'Visual debugging aids for multi-monitor testing',
+        });
+        page.add(debugGroup);
+
+        // Warp Enabled
+        const warpRow = new Adw.ActionRow({
+            title: 'Warp Enabled',
+            subtitle: 'Enable proportional cursor warping (disable to isolate debug visuals)',
+        });
+        const warpSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        settings.bind('warp-enabled', warpSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        warpRow.add_suffix(warpSwitch);
+        debugGroup.add(warpRow);
+
+        // Cursor Overlay
+        const overlayRow = new Adw.ActionRow({
+            title: 'Cursor Overlay',
+            subtitle: 'Show a colored circle at the cursor — color changes per monitor',
+        });
+        const overlaySwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        settings.bind('overlay-enabled', overlaySwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        overlayRow.add_suffix(overlaySwitch);
+        debugGroup.add(overlayRow);
+
+        // Click Flash
+        const clickFlashRow = new Adw.ActionRow({
+            title: 'Click Flash',
+            subtitle: 'Flash a dot at the true click position',
+        });
+        const clickFlashSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        settings.bind('click-flash-enabled', clickFlashSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        clickFlashRow.add_suffix(clickFlashSwitch);
+        debugGroup.add(clickFlashRow);
+
         window.add(page);
     }
 }

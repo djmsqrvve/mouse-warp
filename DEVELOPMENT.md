@@ -37,7 +37,7 @@ Monitor layout used during development:
 - DP-3 (second): 2560x1440 @ +0+1080
 - HDMI-1 (TV): 1920x1080 @ +0+0 (flush-left, managed by `dj display 3`)
 
-### Automated tests (182 assertions)
+### Automated tests (190 assertions)
 
 Run locally with Node.js:
 ```bash
@@ -49,9 +49,10 @@ Or via Docker (also validates schema compilation with glib):
 docker compose run tests
 ```
 
-Tests cover: schema validation, row span computation, dead zone detection, proportional warp math,
-time-based pressure, boundary crossing (live geometry), enable/disable lifecycle, visual feedback,
-settings sync, hot-reload, source position accuracy, and file structure.
+Tests cover: schema validation (7 keys), row span computation, dead zone detection, proportional warp
+math, time-based pressure, boundary crossing (live geometry), enable/disable lifecycle, visual feedback,
+settings sync, hot-reload, source position accuracy, warp-enabled toggle, monitor-config parsing,
+and file structure.
 
 CI runs automatically on push/PR via GitHub Actions (`.github/workflows/test.yml`).
 
