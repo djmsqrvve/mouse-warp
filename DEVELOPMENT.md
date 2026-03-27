@@ -9,8 +9,8 @@ GNOME Shell extension with the following files:
 
 ### Core flow
 
-1. `enable()` → loads GSettings, connects to stage motion events, registers `monitors-changed` for state reset
-2. `_onMotion()` → on every pointer motion (if `is-enabled` is true), computes geometry live:
+1. `enable()` → loads GSettings, starts GLib polling loop (~120Hz), registers `monitors-changed` for state reset
+2. `_onPoll()` → on each poll cycle (if `is-enabled` is true), reads `global.get_pointer()` and computes geometry live:
    - `_rowSpanAt(y)` → finds the monitor row at a given Y and computes its horizontal span (left/right/width/top/bottom), grouping monitors within `ROW_TOLERANCE`
    - **Boundary crossing**: if `_lastY` was in one row and current `y` is in a different row, remap x proportionally using `_lastX` (source position before GNOME moved the cursor)
    - `_findDeadZone(x, y)` → checks if cursor is near a monitor edge with no direct neighbor above/below at this X, but an adjacent row exists
@@ -21,7 +21,8 @@ GNOME Shell extension with the following files:
 
 - `Main.layoutManager.monitors` — array of `{x, y, width, height}` for each monitor
 - `Clutter.get_default_backend().get_default_seat().warp_pointer(x, y)` — moves cursor (works on Wayland inside shell extensions)
-- `global.stage.connect('captured-event', ...)` — intercept all input events
+- `GLib.timeout_add(PRIORITY_DEFAULT, 8, ...)` — poll pointer position at ~120Hz (works on ALL monitors)
+- `global.stage.connect('captured-event', ...)` — intercept click events (primary monitor only on Wayland)
 - `Main.layoutManager.connect('monitors-changed', ...)` — hot-plug detection
 
 ### Anti-recursion

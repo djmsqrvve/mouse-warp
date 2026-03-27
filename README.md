@@ -67,8 +67,8 @@ Enable the extension after switching to layout 3 — the proportional mapping an
 
 ## How it works
 
-1. On `enable()`, the extension connects a `captured-event` handler to the global stage that watches every pointer motion event.
-2. On each motion, geometry is computed live from `Main.layoutManager.monitors` — no pre-built cache:
+1. On `enable()`, the extension starts a GLib polling loop (~120Hz) that reads `global.get_pointer()` for the cursor position across all monitors. (On Wayland, `captured-event` only delivers motion events on the primary monitor — polling bypasses this limitation.)
+2. On each poll, geometry is computed live from `Main.layoutManager.monitors` — no pre-built cache:
    - `_rowSpanAt(y)` determines which monitor row the cursor is in and its full horizontal span.
    - `_findDeadZone(x, y)` checks if the cursor is near an edge with no direct neighbor above/below.
 3. If the cursor crossed between rows (source row differs from target row), the x-coordinate is remapped proportionally using the source position (`_lastX`) for accurate mapping.
@@ -110,7 +110,7 @@ dj video layout 3         # Apply flush-left TV layout for mouse-warp
 
 ## Testing
 
-Run the full test suite (182 assertions) locally:
+Run the full test suite (190 assertions) locally:
 
 ```bash
 bash tests/run_tests.sh
