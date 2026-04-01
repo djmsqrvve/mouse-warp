@@ -53,13 +53,22 @@ function resetMocks() {
     visualFeedbackCalls = [];
     stageListeners = {};
     layoutListeners = {};
+    mockPanel.visible = true;
+    mockPanel.height = 32;
     settingsStore = {
         'edge-tolerance': 2,
         'pressure-threshold-ms': 150,
+        'warp-cooldown-ms': 100,
         'is-enabled': true,
         'warp-enabled': true,
+        'overlap-remap-enabled': true,
         'overlay-enabled': false,
         'click-flash-enabled': false,
+        'visual-feedback-enabled': true,
+        'debug-logging': false,
+        'hide-top-bar': false,
+        'poll-rate-ms': 8,
+        'row-tolerance': 5,
         'monitor-config': '{"0": {"color": "rgba(0,255,0,0.5)", "size": 20}}',
     };
     settingsListeners = {};
@@ -87,6 +96,14 @@ const mockGLib = {
 };
 
 let mockMonitors = [];
+const mockPanel = {
+    visible: true,
+    height: 32,
+    hide() { this.visible = false; },
+    show() { this.visible = true; },
+    set_height(h) { this.height = h; },
+};
+
 const mockMain = {
     layoutManager: {
         monitors: mockMonitors,
@@ -96,6 +113,7 @@ const mockMain = {
     uiGroup: {
         add_child: (widget) => { uiGroupChildren.push(widget); },
     },
+    panel: mockPanel,
 };
 
 function createMockSettings() {
@@ -149,7 +167,10 @@ class TestableMouseWarp {
         this._loadSettings();
 
         this._settingsChangedId = this._settings.connect('changed', () => {
+            const wasHideTopBar = this._hideTopBar;
             this._loadSettings();
+            if (this._hideTopBar !== wasHideTopBar)
+                this._applyTopBar();
         });
 
         this._resetMotionState();
@@ -159,15 +180,24 @@ class TestableMouseWarp {
         this._monitorsChangedId = mockMain.layoutManager.connect(
             'monitors-changed', () => this._resetMotionState()
         );
+
+        this._applyTopBar();
     }
 
     _loadSettings() {
         this._edgeTolerance = this._settings.get_int('edge-tolerance');
         this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
+        this._warpCooldownMs = this._settings.get_int('warp-cooldown-ms');
         this._isEnabled = this._settings.get_boolean('is-enabled');
         this._warpEnabled = this._settings.get_boolean('warp-enabled');
+        this._overlapRemapEnabled = this._settings.get_boolean('overlap-remap-enabled');
         this._overlayEnabled = this._settings.get_boolean('overlay-enabled');
         this._clickFlashEnabled = this._settings.get_boolean('click-flash-enabled');
+        this._visualFeedbackEnabled = this._settings.get_boolean('visual-feedback-enabled');
+        this._debugLogging = this._settings.get_boolean('debug-logging');
+        this._hideTopBar = this._settings.get_boolean('hide-top-bar');
+        this._pollRateMs = this._settings.get_int('poll-rate-ms');
+        this._rowTolerance = this._settings.get_int('row-tolerance');
         try {
             this._monitorConfig = JSON.parse(this._settings.get_string('monitor-config'));
         } catch (e) {
@@ -184,6 +214,7 @@ class TestableMouseWarp {
     }
 
     disable() {
+        this._restoreTopBar();
         this._resetMotionState();
 
         for (const w of this._feedbackWidgets) {
@@ -219,7 +250,7 @@ class TestableMouseWarp {
         }
         if (seedY === null) return null;
 
-        const row = monitors.filter(m => Math.abs(m.y - seedY) <= ROW_TOLERANCE);
+        const row = monitors.filter(m => Math.abs(m.y - seedY) <= this._rowTolerance);
         const left = Math.min(...row.map(m => m.x));
         const right = Math.max(...row.map(m => m.x + m.width));
         const top = Math.min(...row.map(m => m.y));
@@ -237,11 +268,11 @@ class TestableMouseWarp {
 
         if (nearTop) {
             const hasAbove = monitors.some(m =>
-                Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE &&
+                Math.abs((m.y + m.height) - curMon.y) <= this._rowTolerance &&
                 x >= m.x && x < m.x + m.width);
             if (!hasAbove) {
                 const adj = monitors.filter(m =>
-                    Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE);
+                    Math.abs((m.y + m.height) - curMon.y) <= this._rowTolerance);
                 if (adj.length > 0) {
                     const sourceRow = this._rowSpanAt(y, monitors);
                     const tLeft = Math.min(...adj.map(m => m.x));
@@ -258,11 +289,11 @@ class TestableMouseWarp {
         if (nearBottom) {
             const bottomEdge = curMon.y + curMon.height;
             const hasBelow = monitors.some(m =>
-                Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE &&
+                Math.abs(m.y - bottomEdge) <= this._rowTolerance &&
                 x >= m.x && x < m.x + m.width);
             if (!hasBelow) {
                 const adj = monitors.filter(m =>
-                    Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE);
+                    Math.abs(m.y - bottomEdge) <= this._rowTolerance);
                 if (adj.length > 0) {
                     const sourceRow = this._rowSpanAt(y, monitors);
                     const tLeft = Math.min(...adj.map(m => m.x));
@@ -279,12 +310,48 @@ class TestableMouseWarp {
         return null;
     }
 
+    // ── Monitor identification ───────────────────────────────────
+
+    _getMonitorIndexAt(x, y) {
+        const monitors = mockMain.layoutManager.monitors;
+        for (let i = 0; i < monitors.length; i++) {
+            const m = monitors[i];
+            if (x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height)
+                return i;
+        }
+        return -1;
+    }
+
+    _getMonitorOverlayConfig(monitorIndex) {
+        const key = String(monitorIndex);
+        if (this._monitorConfig && this._monitorConfig[key])
+            return this._monitorConfig[key];
+        return {color: 'rgba(255,255,255,0.5)', size: 20};
+    }
+
+    // ── Top bar control ────────────────────────────────────────────
+
+    _applyTopBar() {
+        if (this._hideTopBar) {
+            mockMain.panel.hide();
+            mockMain.panel.set_height(0);
+        } else {
+            this._restoreTopBar();
+        }
+    }
+
+    _restoreTopBar() {
+        mockMain.panel.show();
+        mockMain.panel.set_height(-1);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     _warp(x, y) {
-        this._warpCooldownUntil = mockMonoTime + 100000;
+        this._warpCooldownUntil = mockMonoTime + this._warpCooldownMs * 1000;
         mockClutter.get_default_backend().get_default_seat().warp_pointer(x, y);
-        this._showVisualFeedback(x, y);
+        if (this._visualFeedbackEnabled)
+            this._showVisualFeedback(x, y);
         this._lastX = x;
         this._lastY = y;
     }
@@ -343,7 +410,7 @@ class TestableMouseWarp {
         // ── Warp logic (guarded by warp-enabled toggle) ──
         if (this._warpEnabled) {
             // Boundary crossing: detect row change via live geometry
-            if (this._lastY >= 0) {
+            if (this._overlapRemapEnabled && this._lastY >= 0) {
                 const srcRow = this._rowSpanAt(this._lastY, monitors);
                 const tgtRow = this._rowSpanAt(y, monitors);
 
@@ -1156,6 +1223,329 @@ resetMocks();
     settingsStore['monitor-config'] = 'not valid json';
     for (const cb of Object.values(settingsListeners)) cb();
     assert(typeof ext._monitorConfig === 'object', 'Invalid JSON falls back to empty object');
+
+    ext.disable();
+}
+
+// ── 19. overlap-remap-enabled Toggle ────────────────────────────────
+
+console.log('\n\u2500\u2500 19. overlap-remap-enabled Toggle \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Disable overlap remap
+    settingsStore['overlap-remap-enabled'] = false;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._overlapRemapEnabled, false, 'overlapRemapEnabled is false after settings change');
+
+    // Prime on TV and cross boundary — should NOT remap
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1079;
+    ext._onPoll();
+
+    warpedTo = null;
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1080;
+    ext._onPoll();
+    assert(warpedTo === null, 'No overlap remap when overlap-remap-enabled is false');
+
+    // Dead zone warp should still work (warp-enabled is true)
+    ext._lastX = 0;
+    ext._lastY = 1200;
+    mockGlobal._pointerX = 0;
+    mockGlobal._pointerY = 1080;
+    mockMonoTime = 1000000;
+    ext._onPoll();
+    assert(ext._pressureStartTime > 0, 'Dead zone pressure still works with overlap-remap disabled');
+
+    mockMonoTime = 1200000;
+    ext._onPoll();
+    assert(warpedTo !== null, 'Dead zone warp fires with overlap-remap disabled');
+
+    ext.disable();
+}
+
+// ── 20. visual-feedback-enabled Toggle ──────────────────────────────
+
+console.log('\n\u2500\u2500 20. visual-feedback-enabled Toggle \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Disable visual feedback
+    settingsStore['visual-feedback-enabled'] = false;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._visualFeedbackEnabled, false, 'visualFeedbackEnabled is false after settings change');
+
+    visualFeedbackCalls = [];
+    uiGroupChildren = [];
+    ext._warp(500, 600);
+
+    assertEqual(visualFeedbackCalls.length, 0, 'No visual feedback when visual-feedback-enabled is false');
+    assertEqual(uiGroupChildren.length, 0, 'No widget added when visual feedback disabled');
+    assertEqual(warpedTo.x, 500, 'Warp still moves cursor when visual feedback is disabled');
+
+    // Re-enable visual feedback
+    settingsStore['visual-feedback-enabled'] = true;
+    for (const cb of Object.values(settingsListeners)) cb();
+
+    visualFeedbackCalls = [];
+    uiGroupChildren = [];
+    ext._warp(700, 800);
+
+    assertEqual(visualFeedbackCalls.length, 1, 'Visual feedback restored after re-enabling');
+
+    ext.disable();
+}
+
+// ── 21. warp-cooldown-ms Configuration ──────────────────────────────
+
+console.log('\n\u2500\u2500 21. warp-cooldown-ms Configuration \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Default cooldown is 100ms = 100000μs
+    mockMonoTime = 1000000;
+    ext._warp(2560, 1081);
+    assertEqual(ext._warpCooldownUntil, 1000000 + 100000, 'Default cooldown is 100ms (100000μs)');
+
+    // Change cooldown to 50ms
+    settingsStore['warp-cooldown-ms'] = 50;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._warpCooldownMs, 50, 'warpCooldownMs updated to 50');
+
+    mockMonoTime = 2000000;
+    ext._warp(2560, 1081);
+    assertEqual(ext._warpCooldownUntil, 2000000 + 50000, 'Cooldown uses configured 50ms (50000μs)');
+
+    // Change cooldown to 300ms
+    settingsStore['warp-cooldown-ms'] = 300;
+    for (const cb of Object.values(settingsListeners)) cb();
+
+    mockMonoTime = 3000000;
+    ext._warp(2560, 1081);
+    assertEqual(ext._warpCooldownUntil, 3000000 + 300000, 'Cooldown uses configured 300ms (300000μs)');
+
+    ext.disable();
+}
+
+// ── 22. New Settings Load on Enable ─────────────────────────────────
+
+console.log('\n\u2500\u2500 22. New Settings Load on Enable \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    assertEqual(ext._warpCooldownMs, 100, 'warpCooldownMs loaded from settings default (100)');
+    assertEqual(ext._overlapRemapEnabled, true, 'overlapRemapEnabled loaded from settings default (true)');
+    assertEqual(ext._visualFeedbackEnabled, true, 'visualFeedbackEnabled loaded from settings default (true)');
+    assertEqual(ext._debugLogging, false, 'debugLogging loaded from settings default (false)');
+    assertEqual(ext._hideTopBar, false, 'hideTopBar loaded from settings default (false)');
+    assertEqual(ext._pollRateMs, 8, 'pollRateMs loaded from settings default (8)');
+    assertEqual(ext._rowTolerance, 5, 'rowTolerance loaded from settings default (5)');
+
+    ext.disable();
+}
+
+// ── 23. hide-top-bar Toggle ─────────────────────────────────────────
+
+console.log('\n\u2500\u2500 23. hide-top-bar Toggle \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Panel should be visible by default
+    assertEqual(mockPanel.visible, true, 'Panel visible on enable (hide-top-bar default false)');
+    assert(mockPanel.height !== 0, 'Panel has non-zero height on enable');
+
+    // Enable hide-top-bar
+    settingsStore['hide-top-bar'] = true;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._hideTopBar, true, 'hideTopBar is true after settings change');
+    assertEqual(mockPanel.visible, false, 'Panel hidden when hide-top-bar enabled');
+    assertEqual(mockPanel.height, 0, 'Panel height set to 0 when hidden');
+
+    // Disable hide-top-bar
+    settingsStore['hide-top-bar'] = false;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._hideTopBar, false, 'hideTopBar is false after settings change');
+    assertEqual(mockPanel.visible, true, 'Panel visible again when hide-top-bar disabled');
+    assertEqual(mockPanel.height, -1, 'Panel height reset to natural (-1) when shown');
+
+    // Enable hide-top-bar, then disable extension — panel should restore
+    settingsStore['hide-top-bar'] = true;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(mockPanel.visible, false, 'Panel hidden before extension disable');
+
+    ext.disable();
+    assertEqual(mockPanel.visible, true, 'Panel restored on extension disable');
+    assertEqual(mockPanel.height, -1, 'Panel height restored on extension disable');
+}
+
+// ── 24. _getMonitorIndexAt ───────────────────────────────────────────
+
+console.log('\n\u2500\u2500 24. _getMonitorIndexAt \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // On TV (monitor 0)
+    assertEqual(ext._getMonitorIndexAt(500, 500), 0, 'Point on TV returns monitor 0');
+
+    // On left desk (monitor 1)
+    assertEqual(ext._getMonitorIndexAt(500, 1200), 1, 'Point on DP-3 returns monitor 1');
+
+    // On right desk (monitor 2)
+    assertEqual(ext._getMonitorIndexAt(3000, 1200), 2, 'Point on DP-1 returns monitor 2');
+
+    // Outside all monitors
+    assertEqual(ext._getMonitorIndexAt(9999, 9999), -1, 'Point outside all monitors returns -1');
+
+    // Boundary pixel between monitors (x=2560 is right desk, not left)
+    assertEqual(ext._getMonitorIndexAt(2560, 1200), 2, 'x=2560 belongs to right desk (monitor 2)');
+
+    // Boundary pixel y=1080 is lower row
+    assertEqual(ext._getMonitorIndexAt(500, 1080), 1, 'y=1080 belongs to lower row (monitor 1)');
+
+    ext.disable();
+}
+
+// ── 25. row-tolerance Configuration ─────────────────────────────────
+
+console.log('\n\u2500\u2500 25. row-tolerance Configuration \u2500\u2500');
+
+resetMocks();
+{
+    // Monitors with 8px Y misalignment — default tolerance=5 won't group them
+    mockMain.layoutManager.monitors = [
+        { x: 0,    y: 0,    width: 1920, height: 1080 },
+        { x: 0,    y: 1080, width: 2560, height: 1440 },
+        { x: 2560, y: 1088, width: 2560, height: 1440 },  // 8px off from left desk
+    ];
+
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // With default tolerance=5, the two bottom monitors are NOT in the same row
+    const row1 = ext._rowSpanAt(1200, mockMain.layoutManager.monitors);
+    assert(row1 !== null, 'Row found at y=1200 with tolerance=5');
+    assertEqual(row1.width, 2560, 'With tolerance=5, only left monitor in row (width=2560)');
+
+    // Increase tolerance to 10 — now they should group
+    settingsStore['row-tolerance'] = 10;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._rowTolerance, 10, 'rowTolerance updated to 10');
+
+    const row2 = ext._rowSpanAt(1200, mockMain.layoutManager.monitors);
+    assert(row2 !== null, 'Row found at y=1200 with tolerance=10');
+    assertEqual(row2.width, 5120, 'With tolerance=10, both bottom monitors in row (width=5120)');
+
+    ext.disable();
+}
+
+// ── 26. poll-rate-ms Configuration ──────────────────────────────────
+
+console.log('\n\u2500\u2500 26. poll-rate-ms Configuration \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    assertEqual(ext._pollRateMs, 8, 'Default poll rate is 8ms');
+
+    // Change poll rate
+    settingsStore['poll-rate-ms'] = 16;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._pollRateMs, 16, 'pollRateMs updated to 16');
+
+    settingsStore['poll-rate-ms'] = 4;
+    for (const cb of Object.values(settingsListeners)) cb();
+    assertEqual(ext._pollRateMs, 4, 'pollRateMs updated to 4');
+
+    ext.disable();
+}
+
+// ── 27. _getMonitorOverlayConfig ────────────────────────────────────
+
+console.log('\n\u2500\u2500 27. _getMonitorOverlayConfig \u2500\u2500');
+
+resetMocks();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Monitor 0 has config
+    const cfg0 = ext._getMonitorOverlayConfig(0);
+    assertEqual(cfg0.color, 'rgba(0,255,0,0.5)', 'Monitor 0 color from config');
+    assertEqual(cfg0.size, 20, 'Monitor 0 size from config');
+
+    // Monitor 5 has no config — should get defaults
+    const cfg5 = ext._getMonitorOverlayConfig(5);
+    assertEqual(cfg5.color, 'rgba(255,255,255,0.5)', 'Unknown monitor gets default white color');
+    assertEqual(cfg5.size, 20, 'Unknown monitor gets default size 20');
+
+    ext.disable();
+}
+
+// ── 28. Warp During Cooldown Edge Case ──────────────────────────────
+
+console.log('\n\u2500\u2500 28. Warp During Cooldown Edge Case \u2500\u2500');
+
+resetMocks();
+setupDualRowMonitors();
+{
+    const ext = new TestableMouseWarp();
+    ext.enable();
+
+    // Prime on TV
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1079;
+    ext._onPoll();
+
+    // Cross down — triggers warp + cooldown
+    mockMonoTime = 1000000;
+    mockGlobal._pointerX = 960;
+    mockGlobal._pointerY = 1080;
+    ext._onPoll();
+    assert(warpedTo !== null, 'First crossing warps');
+    const firstWarpX = warpedTo.x;
+
+    // During cooldown, move to dead zone — should NOT trigger pressure
+    warpedTo = null;
+    mockGlobal._pointerX = 0;
+    mockGlobal._pointerY = 1080;
+    ext._onPoll();
+    assertEqual(ext._pressureStartTime, 0, 'Pressure timer NOT started during cooldown');
+    assert(warpedTo === null, 'No warp during cooldown');
+
+    // After cooldown expires, move cursor slightly to trigger poll processing
+    mockMonoTime = 2000000;
+    mockGlobal._pointerX = 1;
+    mockGlobal._pointerY = 1080;
+    ext._onPoll();
+    assert(ext._pressureStartTime > 0, 'Pressure timer starts after cooldown expires');
 
     ext.disable();
 }

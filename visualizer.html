@@ -101,7 +101,10 @@
     <div>
       <div class="settings-row"><span class="settings-label">edge-tolerance</span><span class="settings-value" id="s-edge">2px</span></div>
       <div class="settings-row"><span class="settings-label">pressure-threshold</span><span class="settings-value" id="s-pressure">150ms</span></div>
-      <div class="settings-row"><span class="settings-label">warp-enabled</span><span class="settings-value" id="s-warp">true</span></div>
+      <div class="settings-row"><span class="settings-label">warp-cooldown</span><span class="settings-value" id="s-cooldown">100ms</span></div>
+      <div class="settings-row"><span class="settings-label">overlap-remap</span><span class="settings-value" id="s-overlap">true</span></div>
+      <div class="settings-row"><span class="settings-label">dead-zone-warp</span><span class="settings-value" id="s-warp">true</span></div>
+      <div class="settings-row"><span class="settings-label">visual-feedback</span><span class="settings-value" id="s-feedback">true</span></div>
       <div class="settings-row"><span class="settings-label">overlay-enabled</span><span class="settings-value" id="s-overlay">false</span></div>
       <div class="settings-row"><span class="settings-label">click-flash</span><span class="settings-value" id="s-click">false</span></div>
     </div>
@@ -112,7 +115,8 @@
 const SETTINGS = window.MOUSE_WARP_SETTINGS || {};
 
 // ── Monitor data (both pixel and physical) ──
-const MONITORS = [
+// Default layout — overridden by injected geometry if available
+const DEFAULT_MONITORS = [
   { id: 'hdmi1', name: 'HDMI-1 (TV)', px: { x:0, y:0, w:1920, h:1080 }, color: '#f97316', hz: '60Hz',
     phys: { wIn: 44, hIn: 25, wallX: 8, wallY: 55 } },
   { id: 'dp3', name: 'DP-3 (Left)', px: { x:0, y:1080, w:2560, h:1440 }, color: '#22c55e', hz: '60Hz',
@@ -121,13 +125,35 @@ const MONITORS = [
     phys: { wIn: 24, hIn: 13, wallX: 38, wallY: 22 } },
 ];
 
+// Apply injected monitor geometry if available (from dj mouse warp visualize)
+const MONITORS = (function() {
+  if (SETTINGS.monitors && Array.isArray(SETTINGS.monitors) && SETTINGS.monitors.length > 0) {
+    return SETTINGS.monitors.map((inj, i) => {
+      const def = DEFAULT_MONITORS[i] || DEFAULT_MONITORS[0];
+      return {
+        id: inj.id || def.id,
+        name: inj.name || def.name,
+        px: inj.px || def.px,
+        color: inj.color || def.color,
+        hz: inj.hz || def.hz,
+        primary: inj.primary || false,
+        phys: inj.phys || def.phys,
+      };
+    });
+  }
+  return DEFAULT_MONITORS;
+})();
+
 // Apply injected settings
 if (SETTINGS.settings) {
   const s = SETTINGS.settings;
   const el = (id, v) => { const e = document.getElementById(id); if (e && v !== undefined) e.textContent = v; };
   el('s-edge', (s['edge-tolerance'] ?? 2) + 'px');
   el('s-pressure', (s['pressure-threshold-ms'] ?? 150) + 'ms');
+  el('s-cooldown', (s['warp-cooldown-ms'] ?? 100) + 'ms');
+  el('s-overlap', String(s['overlap-remap-enabled'] ?? true));
   el('s-warp', String(s['warp-enabled'] ?? true));
+  el('s-feedback', String(s['visual-feedback-enabled'] ?? true));
   el('s-overlay', String(s['overlay-enabled'] ?? false));
   el('s-click', String(s['click-flash-enabled'] ?? false));
 }
@@ -355,9 +381,18 @@ function drawOS(mouse) {
     ctx.fillStyle = '#3b82f680'; ctx.fillText(`${Math.round((1 - SPLIT) * 100)}% → DP-1`, srx + rightW / 2, sly + tvH - 6);
   }
 
-  // Dead zones
+  // Dead zones (check both left and right sides)
   if (osShow.zones) {
+    const tvL = TV.px.x;
     const tvR = TV.px.x + TV.px.w;
+    // Left dead zone: bottom row extends left of TV
+    if (tvL > BRL) {
+      const [dx, dy] = toC(BRL, BY); const dw = (tvL - BRL) * S;
+      ctx.fillStyle = '#ef444418'; ctx.fillRect(dx, dy - 4 * S, dw, 8 * S);
+      ctx.fillStyle = '#ef444460'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('DEAD ZONE', dx + dw / 2, dy);
+    }
+    // Right dead zone: bottom row extends right of TV
     if (tvR < BRR) {
       const [dx, dy] = toC(tvR, BY); const dw = (BRR - tvR) * S;
       ctx.fillStyle = '#ef444418'; ctx.fillRect(dx, dy - 4 * S, dw, 8 * S);

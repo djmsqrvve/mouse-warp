@@ -36,5 +36,40 @@
       <summary>Per-Monitor Config</summary>
       <description>JSON mapping monitor index to overlay color and size.</description>
     </key>
+    <key name="warp-cooldown-ms" type="i">
+      <default>100</default>
+      <summary>Warp Cooldown (ms)</summary>
+      <description>Cooldown in milliseconds after a warp before another can trigger. Prevents double-warps from a single crossing.</description>
+    </key>
+    <key name="overlap-remap-enabled" type="b">
+      <default>true</default>
+      <summary>Overlap Remap Enabled</summary>
+      <description>Whether to proportionally remap the x-coordinate when crossing between monitor rows at overlap zones. Disable to only use dead-zone pressure warping.</description>
+    </key>
+    <key name="visual-feedback-enabled" type="b">
+      <default>true</default>
+      <summary>Visual Feedback Enabled</summary>
+      <description>Show a blue glow circle at the warp destination when a warp occurs.</description>
+    </key>
+    <key name="debug-logging" type="b">
+      <default>false</default>
+      <summary>Debug Logging</summary>
+      <description>Log warp events and diagnostics to the GNOME Shell journal.</description>
+    </key>
+    <key name="hide-top-bar" type="b">
+      <default>false</default>
+      <summary>Hide Top Bar</summary>
+      <description>Hide the GNOME top bar (panel). Reclaims screen space and eliminates top-edge hitbox interference with monitor boundary detection.</description>
+    </key>
+    <key name="poll-rate-ms" type="i">
+      <default>8</default>
+      <summary>Poll Rate (ms)</summary>
+      <description>Interval in milliseconds between cursor position polls. Lower = more responsive but higher CPU. Default 8ms (~120Hz).</description>
+    </key>
+    <key name="row-tolerance" type="i">
+      <default>5</default>
+      <summary>Row Tolerance (px)</summary>
+      <description>Maximum Y-offset in pixels for grouping monitors into the same row. Increase if monitors have slight vertical misalignment.</description>
+    </key>
   </schema>
 </schemalist>

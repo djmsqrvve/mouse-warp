@@ -81,9 +81,11 @@ journalctl -f --grep="mouse-warp" _COMM=gnome-shell
 ## Known limitations / TODO
 
 - [ ] Only handles horizontal boundaries (top/bottom). Left/right side-by-side monitors with height mismatches are not handled yet.
-- [ ] Overlap-zone remapping may feel surprising if the smaller monitor is physically centered — the proportional remap shifts x away from 1:1. Could add a config option to disable overlap remapping and only fix dead zones.
+- [x] ~~Overlap-zone remapping may feel surprising if the smaller monitor is physically centered.~~ Now toggleable via `overlap-remap-enabled` setting.
 - [x] ~~Pressure threshold (5 events) is hardcoded.~~ Now configurable via GSettings (`pressure-threshold-ms`) and uses time-based measurement.
-- [x] ~~No preferences UI yet.~~ Preferences window with GTK4/Adwaita + system tray toggle added.
+- [x] ~~No preferences UI yet.~~ Preferences window with GTK4/Adwaita (Warp Settings + Visual Feedback + Debug groups).
+- [x] ~~Warp cooldown is hardcoded.~~ Now configurable via `warp-cooldown-ms` (default 100ms).
+- [x] ~~Debug logging is always on.~~ Now toggleable via `debug-logging` setting (default off).
 - [ ] Not tested with fractional scaling — `monitors` coordinates may be logical, which should be fine, but needs verification.
 - [ ] Not tested with more than 3 monitors or non-rectangular layouts.
 - [ ] Consider publishing to extensions.gnome.org once stable (`make package` creates the zip).

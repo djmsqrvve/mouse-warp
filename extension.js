@@ -29,9 +29,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-const ROW_TOLERANCE = 5;
-const POLL_INTERVAL_MS = 8; // ~120Hz pointer polling
-const WARP_COOLDOWN_US = 100000; // 100ms cooldown after warp (microseconds)
+const DEFAULT_ROW_TOLERANCE = 5;
+const DEFAULT_POLL_RATE_MS = 8; // ~120Hz pointer polling
 
 export default class MouseWarpExtension extends Extension {
     enable() {
@@ -40,11 +39,17 @@ export default class MouseWarpExtension extends Extension {
 
         this._settingsChangedId = this._settings.connect('changed', () => {
             const wasOverlay = this._overlayEnabled;
+            const wasHideTopBar = this._hideTopBar;
+            const wasPollRate = this._pollRateMs;
             this._loadSettings();
             if (wasOverlay && !this._overlayEnabled) {
                 this._destroyOverlay();
                 this._destroyDebugLabel();
             }
+            if (this._hideTopBar !== wasHideTopBar)
+                this._applyTopBar();
+            if (this._pollRateMs !== wasPollRate)
+                this._restartPolling();
         });
 
         this._resetMotionState();
@@ -56,14 +61,7 @@ export default class MouseWarpExtension extends Extension {
 
         // Poll global.get_pointer() for cursor position on ALL monitors.
         // captured-event only delivers MOTION on the primary monitor (Wayland).
-        this._pollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_INTERVAL_MS, () => {
-            try {
-                this._onPoll();
-            } catch (e) {
-                log(`[mouse-warp] poll error: ${e.message}`);
-            }
-            return GLib.SOURCE_CONTINUE;
-        });
+        this._startPolling();
 
         // Keep captured-event for BUTTON_PRESS (click flash) — works on primary
         this._stageEventId = global.stage.connect('captured-event', (_, event) => {
@@ -82,20 +80,31 @@ export default class MouseWarpExtension extends Extension {
             () => {
                 this._resetMotionState();
                 this._overlayLastMonitor = -1;
-                log('[mouse-warp] monitors changed — state reset');
+                if (this._debugLogging)
+                    log('[mouse-warp] monitors changed — state reset');
             }
         );
 
-        log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s), polling at ${POLL_INTERVAL_MS}ms`);
+        this._applyTopBar();
+
+        if (this._debugLogging)
+            log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s), polling at ${this._pollRateMs}ms`);
     }
 
     _loadSettings() {
         this._edgeTolerance = this._settings.get_int('edge-tolerance');
         this._pressureThresholdMs = this._settings.get_int('pressure-threshold-ms');
+        this._warpCooldownMs = this._settings.get_int('warp-cooldown-ms');
         this._isEnabled = this._settings.get_boolean('is-enabled');
         this._warpEnabled = this._settings.get_boolean('warp-enabled');
+        this._overlapRemapEnabled = this._settings.get_boolean('overlap-remap-enabled');
         this._overlayEnabled = this._settings.get_boolean('overlay-enabled');
         this._clickFlashEnabled = this._settings.get_boolean('click-flash-enabled');
+        this._visualFeedbackEnabled = this._settings.get_boolean('visual-feedback-enabled');
+        this._debugLogging = this._settings.get_boolean('debug-logging');
+        this._hideTopBar = this._settings.get_boolean('hide-top-bar');
+        this._pollRateMs = this._settings.get_int('poll-rate-ms');
+        this._rowTolerance = this._settings.get_int('row-tolerance');
         try {
             this._monitorConfig = JSON.parse(this._settings.get_string('monitor-config'));
         } catch (e) {
@@ -112,7 +121,27 @@ export default class MouseWarpExtension extends Extension {
         this._lastX = -1;
     }
 
+    _startPolling() {
+        this._pollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._pollRateMs, () => {
+            try {
+                this._onPoll();
+            } catch (e) {
+                log(`[mouse-warp] poll error: ${e.message}`);
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _restartPolling() {
+        if (this._pollTimerId) {
+            GLib.source_remove(this._pollTimerId);
+            this._pollTimerId = null;
+        }
+        this._startPolling();
+    }
+
     disable() {
+        this._restoreTopBar();
         this._resetMotionState();
 
         if (this._pollTimerId) {
@@ -142,7 +171,8 @@ export default class MouseWarpExtension extends Extension {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = null;
         }
-        log('[mouse-warp] disabled');
+        if (this._debugLogging)
+            log('[mouse-warp] disabled');
     }
 
     // ── Live geometry helpers ─────────────────────────────────────
@@ -157,7 +187,7 @@ export default class MouseWarpExtension extends Extension {
         }
         if (seedY === null) return null;
 
-        const row = monitors.filter(m => Math.abs(m.y - seedY) <= ROW_TOLERANCE);
+        const row = monitors.filter(m => Math.abs(m.y - seedY) <= this._rowTolerance);
         const left = Math.min(...row.map(m => m.x));
         const right = Math.max(...row.map(m => m.x + m.width));
         const top = Math.min(...row.map(m => m.y));
@@ -175,11 +205,11 @@ export default class MouseWarpExtension extends Extension {
 
         if (nearTop) {
             const hasAbove = monitors.some(m =>
-                Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE &&
+                Math.abs((m.y + m.height) - curMon.y) <= this._rowTolerance &&
                 x >= m.x && x < m.x + m.width);
             if (!hasAbove) {
                 const adj = monitors.filter(m =>
-                    Math.abs((m.y + m.height) - curMon.y) <= ROW_TOLERANCE);
+                    Math.abs((m.y + m.height) - curMon.y) <= this._rowTolerance);
                 if (adj.length > 0) {
                     const sourceRow = this._rowSpanAt(y, monitors);
                     const tLeft = Math.min(...adj.map(m => m.x));
@@ -196,11 +226,11 @@ export default class MouseWarpExtension extends Extension {
         if (nearBottom) {
             const bottomEdge = curMon.y + curMon.height;
             const hasBelow = monitors.some(m =>
-                Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE &&
+                Math.abs(m.y - bottomEdge) <= this._rowTolerance &&
                 x >= m.x && x < m.x + m.width);
             if (!hasBelow) {
                 const adj = monitors.filter(m =>
-                    Math.abs(m.y - bottomEdge) <= ROW_TOLERANCE);
+                    Math.abs(m.y - bottomEdge) <= this._rowTolerance);
                 if (adj.length > 0) {
                     const sourceRow = this._rowSpanAt(y, monitors);
                     const tLeft = Math.min(...adj.map(m => m.x));
@@ -305,6 +335,32 @@ export default class MouseWarpExtension extends Extension {
         }
     }
 
+    // ── Top bar control ────────────────────────────────────────────
+
+    _applyTopBar() {
+        try {
+            if (this._hideTopBar) {
+                Main.panel.hide();
+                // Also hide the panel's allocation so windows can use the space
+                Main.panel.set_height(0);
+            } else {
+                this._restoreTopBar();
+            }
+        } catch (e) {
+            log(`[mouse-warp] top bar error: ${e.message}`);
+        }
+    }
+
+    _restoreTopBar() {
+        try {
+            Main.panel.show();
+            // Reset height to default (-1 = natural height)
+            Main.panel.set_height(-1);
+        } catch (e) {
+            log(`[mouse-warp] top bar restore error: ${e.message}`);
+        }
+    }
+
     _onButtonPress() {
         if (!this._isEnabled || !this._clickFlashEnabled) return;
 
@@ -341,10 +397,11 @@ export default class MouseWarpExtension extends Extension {
 
     _warp(x, y) {
         // Set cooldown to prevent false crossings from the warp destination
-        this._warpCooldownUntil = GLib.get_monotonic_time() + WARP_COOLDOWN_US;
+        this._warpCooldownUntil = GLib.get_monotonic_time() + this._warpCooldownMs * 1000;
         try {
             Clutter.get_default_backend().get_default_seat().warp_pointer(x, y);
-            this._showVisualFeedback(x, y);
+            if (this._visualFeedbackEnabled)
+                this._showVisualFeedback(x, y);
             // Update tracking to warped position immediately
             this._lastX = x;
             this._lastY = y;
@@ -428,7 +485,7 @@ export default class MouseWarpExtension extends Extension {
         // ── Warp logic ──
         if (this._warpEnabled) {
             // Boundary crossing: detect row change via live geometry
-            if (this._lastY >= 0) {
+            if (this._overlapRemapEnabled && this._lastY >= 0) {
                 const srcRow = this._rowSpanAt(this._lastY, monitors);
                 const tgtRow = this._rowSpanAt(y, monitors);
 
@@ -441,9 +498,10 @@ export default class MouseWarpExtension extends Extension {
                                 (sourceX - srcRow.left) / srcRow.width));
                             const newX = Math.round(
                                 tgtRow.left + ratio * (tgtRow.width - 1));
-                            log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
-                                `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
-                                `x=${sourceX}->${newX}`);
+                            if (this._debugLogging)
+                                log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
+                                    `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
+                                    `x=${sourceX}->${newX}`);
                             if (Math.abs(newX - x) > 1)
                                 this._warp(newX, y);
                             else {
@@ -471,6 +529,8 @@ export default class MouseWarpExtension extends Extension {
                             (x - sourceRow.left) / sourceRow.width));
                         const newX = Math.round(
                             targetRow.left + ratio * (targetRow.width - 1));
+                        if (this._debugLogging)
+                            log(`[mouse-warp] DEAD ZONE WARP: x=${x}->${newX} y=${y}->${warpY}`);
                         this._warp(newX, warpY);
                         this._pressureStartTime = 0;
                     }
