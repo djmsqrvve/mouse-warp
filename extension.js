@@ -119,6 +119,7 @@ export default class MouseWarpExtension extends Extension {
         this._pressureStartTime = 0;
         this._lastY = -1;
         this._lastX = -1;
+        this._warpCooldownUntil = 0;
     }
 
     _startPolling() {
@@ -162,6 +163,7 @@ export default class MouseWarpExtension extends Extension {
             this._settingsChangedId = null;
         }
         this._settings = null;
+        this._monitorConfig = null;
 
         if (this._stageEventId) {
             global.stage.disconnect(this._stageEventId);
@@ -177,6 +179,11 @@ export default class MouseWarpExtension extends Extension {
 
     // ── Live geometry helpers ─────────────────────────────────────
 
+    /**
+     * Returns the row span containing the given Y coordinate.
+     * Row = all monitors whose top Y is within _rowTolerance of the seed monitor.
+     * Returns {left, right, width, top, bottom, monitors} or null.
+     */
     _rowSpanAt(y, monitors) {
         let seedY = null;
         for (const m of monitors) {
@@ -188,11 +195,51 @@ export default class MouseWarpExtension extends Extension {
         if (seedY === null) return null;
 
         const row = monitors.filter(m => Math.abs(m.y - seedY) <= this._rowTolerance);
+        if (row.length === 0) return null;
         const left = Math.min(...row.map(m => m.x));
         const right = Math.max(...row.map(m => m.x + m.width));
         const top = Math.min(...row.map(m => m.y));
         const bottom = Math.max(...row.map(m => m.y + m.height));
-        return {left, right, width: right - left, top, bottom};
+        const width = right - left;
+        if (width <= 0) return null;
+        return {left, right, width, top, bottom, monitors: row};
+    }
+
+    /**
+     * Returns true if (x, y) is on one of the given monitors.
+     */
+    _isOnMonitor(x, y, candidates) {
+        return candidates.some(m =>
+            x >= m.x && x < m.x + m.width &&
+            y >= m.y && y < m.y + m.height);
+    }
+
+    /**
+     * Snap (x, y) to the nearest point that is actually on one of the
+     * candidate monitors. Prevents warping into gaps between monitors,
+     * off-screen, or into negative-coordinate voids.
+     */
+    _snapToMonitors(x, y, candidates) {
+        // Already on a monitor — no snapping needed
+        for (const m of candidates) {
+            if (x >= m.x && x < m.x + m.width &&
+                y >= m.y && y < m.y + m.height)
+                return {x, y};
+        }
+        // Find the nearest point on the nearest monitor (Manhattan for perf,
+        // clamped to monitor bounds)
+        let bestX = x, bestY = y, bestDist = Infinity;
+        for (const m of candidates) {
+            const cx = Math.max(m.x, Math.min(x, m.x + m.width - 1));
+            const cy = Math.max(m.y, Math.min(y, m.y + m.height - 1));
+            const dist = Math.abs(cx - x) + Math.abs(cy - y);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestX = cx;
+                bestY = cy;
+            }
+        }
+        return {x: bestX, y: bestY};
     }
 
     _findDeadZone(x, y, monitors) {
@@ -217,6 +264,7 @@ export default class MouseWarpExtension extends Extension {
                     return {
                         sourceRow,
                         targetRow: {left: tLeft, right: tRight, width: tRight - tLeft},
+                        targetMonitors: adj,
                         warpY: curMon.y - this._edgeTolerance - 1,
                     };
                 }
@@ -238,6 +286,7 @@ export default class MouseWarpExtension extends Extension {
                     return {
                         sourceRow,
                         targetRow: {left: tLeft, right: tRight, width: tRight - tLeft},
+                        targetMonitors: adj,
                         warpY: bottomEdge + this._edgeTolerance + 1,
                     };
                 }
@@ -363,6 +412,7 @@ export default class MouseWarpExtension extends Extension {
 
     _onButtonPress() {
         if (!this._isEnabled || !this._clickFlashEnabled) return;
+        if (!Main.layoutManager.monitors || Main.layoutManager.monitors.length < 2) return;
 
         const [x, y] = global.get_pointer();
         const size = 8;
@@ -454,6 +504,12 @@ export default class MouseWarpExtension extends Extension {
             return;
         }
 
+        const monitors = Main.layoutManager.monitors;
+
+        // Single monitor — nothing to warp, overlay, or debug
+        if (!monitors || monitors.length < 2)
+            return;
+
         const [x, y] = global.get_pointer();
 
         // Skip if cursor hasn't moved AND no active pressure timer
@@ -468,18 +524,10 @@ export default class MouseWarpExtension extends Extension {
             return;
         }
 
-        const monitors = Main.layoutManager.monitors;
-
-        // Debug overlay + label (runs on ALL monitors now!)
+        // Debug overlay + label
         if (this._overlayEnabled) {
             this._updateOverlay(x, y);
             this._updateDebugLabel(x, y);
-        }
-
-        if (!monitors || monitors.length < 2) {
-            this._lastX = x;
-            this._lastY = y;
-            return;
         }
 
         // ── Warp logic ──
@@ -493,11 +541,15 @@ export default class MouseWarpExtension extends Extension {
                     if (Math.abs(srcRow.width - tgtRow.width) >= 2 ||
                         Math.abs(srcRow.left - tgtRow.left) >= 2) {
                         const sourceX = this._lastX;
-                        if (sourceX >= srcRow.left && sourceX < srcRow.right) {
+                        // Verify source is on an actual monitor, not in a gap
+                        if (this._isOnMonitor(sourceX, this._lastY, srcRow.monitors)) {
                             const ratio = Math.max(0, Math.min(1,
                                 (sourceX - srcRow.left) / srcRow.width));
-                            const newX = Math.round(
+                            let newX = Math.round(
                                 tgtRow.left + ratio * (tgtRow.width - 1));
+                            // Snap to actual monitor — prevents landing in gaps
+                            const snapped = this._snapToMonitors(newX, y, tgtRow.monitors);
+                            newX = snapped.x;
                             if (this._debugLogging)
                                 log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
                                     `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
@@ -524,14 +576,22 @@ export default class MouseWarpExtension extends Extension {
                     const elapsedMs =
                         (GLib.get_monotonic_time() - this._pressureStartTime) / 1000;
                     if (elapsedMs > this._pressureThresholdMs) {
-                        const {sourceRow, targetRow, warpY} = deadZone;
+                        const {sourceRow, targetRow, targetMonitors, warpY} = deadZone;
+                        if (!sourceRow || sourceRow.width <= 0 || targetRow.width <= 0) {
+                            this._pressureStartTime = 0;
+                            this._lastX = x;
+                            this._lastY = y;
+                            return;
+                        }
                         const ratio = Math.max(0, Math.min(1,
                             (x - sourceRow.left) / sourceRow.width));
-                        const newX = Math.round(
+                        const rawX = Math.round(
                             targetRow.left + ratio * (targetRow.width - 1));
+                        // Snap both X and Y to actual target monitor
+                        const snapped = this._snapToMonitors(rawX, warpY, targetMonitors);
                         if (this._debugLogging)
-                            log(`[mouse-warp] DEAD ZONE WARP: x=${x}->${newX} y=${y}->${warpY}`);
-                        this._warp(newX, warpY);
+                            log(`[mouse-warp] DEAD ZONE WARP: x=${x}->${snapped.x} y=${y}->${snapped.y}`);
+                        this._warp(snapped.x, snapped.y);
                         this._pressureStartTime = 0;
                     }
                 }

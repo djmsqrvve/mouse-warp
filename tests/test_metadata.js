@@ -160,6 +160,48 @@ assert(
     'Has disabled-path guard in _onMotion and resets motion state'
 );
 
+// Single monitor bypass
+assert(
+    ext.includes('monitors.length < 2'),
+    'Has single-monitor bypass guard (monitors.length < 2)'
+);
+
+// Click flash
+assert(ext.includes('_onButtonPress'), 'Has _onButtonPress method');
+
+// Overlay and debug label
+assert(ext.includes('_updateOverlay'), 'Has _updateOverlay method');
+assert(ext.includes('_destroyOverlay'), 'Has _destroyOverlay method');
+assert(ext.includes('_updateDebugLabel'), 'Has _updateDebugLabel method');
+assert(ext.includes('_destroyDebugLabel'), 'Has _destroyDebugLabel method');
+
+// Top bar control
+assert(ext.includes('_applyTopBar'), 'Has _applyTopBar method');
+assert(ext.includes('_restoreTopBar'), 'Has _restoreTopBar method');
+
+// Monitors-changed signal
+assert(ext.includes('monitors-changed'), 'Connects to monitors-changed signal');
+
+// Polling architecture
+assert(ext.includes('_startPolling'), 'Has _startPolling method');
+assert(ext.includes('_restartPolling'), 'Has _restartPolling method');
+assert(ext.includes('_onPoll'), 'Has _onPoll method');
+assert(ext.includes('GLib.timeout_add'), 'Uses GLib.timeout_add for polling');
+
+// Warp cooldown
+assert(ext.includes('_warpCooldownUntil'), 'Tracks warp cooldown');
+assert(ext.includes('warp_pointer'), 'Calls Clutter warp_pointer');
+
+// Gap-safe snapping
+assert(ext.includes('_snapToMonitors'), 'Has _snapToMonitors method for gap-safe warping');
+assert(ext.includes('targetMonitors'), 'Dead zone returns targetMonitors for snap validation');
+
+// Source validation
+assert(ext.includes('_isOnMonitor'), 'Has _isOnMonitor method for gap-aware source validation');
+
+// Zero-width guard
+assert(ext.includes('width <= 0'), 'Guards against zero-width rows');
+
 // ═════════════════════════════════════════════════════════════════
 // Files that should exist
 // ═════════════════════════════════════════════════════════════════

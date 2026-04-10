@@ -2,7 +2,7 @@ UUID = mouse-warp@djmsqrvve
 INSTALL_DIR = $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SOURCES = extension.js metadata.json prefs.js schemas
 
-.PHONY: install uninstall package compile-schemas
+.PHONY: install uninstall package compile-schemas test
 
 compile-schemas:
 	glib-compile-schemas schemas/
@@ -17,6 +17,9 @@ install: compile-schemas
 uninstall:
 	rm -rf $(INSTALL_DIR)
 	@echo "Removed $(INSTALL_DIR)"
+
+test:
+	bash tests/run_tests.sh
 
 package: compile-schemas
 	zip -r $(UUID).zip $(SOURCES)
