@@ -34,7 +34,7 @@ const DEFAULT_POLL_RATE_MS = 8; // ~120Hz pointer polling
 
 export default class MouseWarpExtension extends Extension {
     enable() {
-        this._settings = this.getSettings('org.gnome.shell.extensions.mouse-warp');
+        this._settings = this.getSettings('org.gnome.shell.extensions.dj-mouse-warp');
         this._loadSettings();
 
         this._settingsChangedId = this._settings.connect('changed', () => {
@@ -69,7 +69,7 @@ export default class MouseWarpExtension extends Extension {
                 try {
                     this._onButtonPress();
                 } catch (e) {
-                    log(`[mouse-warp] click handler error: ${e.message}`);
+                    log(`[dj-mouse-warp] click handler error: ${e.message}`);
                 }
             }
             return Clutter.EVENT_PROPAGATE;
@@ -81,14 +81,14 @@ export default class MouseWarpExtension extends Extension {
                 this._resetMotionState();
                 this._overlayLastMonitor = -1;
                 if (this._debugLogging)
-                    log('[mouse-warp] monitors changed — state reset');
+                    log('[dj-mouse-warp] monitors changed — state reset');
             }
         );
 
         this._applyTopBar();
 
         if (this._debugLogging)
-            log(`[mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s), polling at ${this._pollRateMs}ms`);
+            log(`[dj-mouse-warp] enabled — ${Main.layoutManager.monitors.length} monitor(s), polling at ${this._pollRateMs}ms`);
     }
 
     _loadSettings() {
@@ -108,7 +108,7 @@ export default class MouseWarpExtension extends Extension {
         try {
             this._monitorConfig = JSON.parse(this._settings.get_string('monitor-config'));
         } catch (e) {
-            log(`[mouse-warp] invalid monitor-config JSON: ${e.message}`);
+            log(`[dj-mouse-warp] invalid monitor-config JSON: ${e.message}`);
             this._monitorConfig = {};
         }
         if (!this._isEnabled)
@@ -127,7 +127,7 @@ export default class MouseWarpExtension extends Extension {
             try {
                 this._onPoll();
             } catch (e) {
-                log(`[mouse-warp] poll error: ${e.message}`);
+                log(`[dj-mouse-warp] poll error: ${e.message}`);
             }
             return GLib.SOURCE_CONTINUE;
         });
@@ -174,7 +174,7 @@ export default class MouseWarpExtension extends Extension {
             this._monitorsChangedId = null;
         }
         if (this._debugLogging)
-            log('[mouse-warp] disabled');
+            log('[dj-mouse-warp] disabled');
     }
 
     // ── Live geometry helpers ─────────────────────────────────────
@@ -343,7 +343,7 @@ export default class MouseWarpExtension extends Extension {
 
             this._overlayWidget.set_position(x - size / 2, y - size / 2);
         } catch (e) {
-            log(`[mouse-warp] overlay error: ${e.message}`);
+            log(`[dj-mouse-warp] overlay error: ${e.message}`);
         }
     }
 
@@ -373,7 +373,7 @@ export default class MouseWarpExtension extends Extension {
             if (primary)
                 this._debugLabel.set_position(primary.x + 10, primary.y + 10);
         } catch (e) {
-            log(`[mouse-warp] debug label error: ${e.message}`);
+            log(`[dj-mouse-warp] debug label error: ${e.message}`);
         }
     }
 
@@ -396,7 +396,7 @@ export default class MouseWarpExtension extends Extension {
                 this._restoreTopBar();
             }
         } catch (e) {
-            log(`[mouse-warp] top bar error: ${e.message}`);
+            log(`[dj-mouse-warp] top bar error: ${e.message}`);
         }
     }
 
@@ -406,7 +406,7 @@ export default class MouseWarpExtension extends Extension {
             // Reset height to default (-1 = natural height)
             Main.panel.set_height(-1);
         } catch (e) {
-            log(`[mouse-warp] top bar restore error: ${e.message}`);
+            log(`[dj-mouse-warp] top bar restore error: ${e.message}`);
         }
     }
 
@@ -456,7 +456,7 @@ export default class MouseWarpExtension extends Extension {
             this._lastX = x;
             this._lastY = y;
         } catch (e) {
-            log(`[mouse-warp] warp error: ${e.message}`);
+            log(`[dj-mouse-warp] warp error: ${e.message}`);
             this._warpCooldownUntil = 0;
         }
     }
@@ -492,7 +492,7 @@ export default class MouseWarpExtension extends Extension {
                 }
             });
         } catch (e) {
-            log(`[mouse-warp] visual feedback error: ${e.message}`);
+            log(`[dj-mouse-warp] visual feedback error: ${e.message}`);
         }
     }
 
@@ -551,7 +551,7 @@ export default class MouseWarpExtension extends Extension {
                             const snapped = this._snapToMonitors(newX, y, tgtRow.monitors);
                             newX = snapped.x;
                             if (this._debugLogging)
-                                log(`[mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
+                                log(`[dj-mouse-warp] CROSS ${tgtRow.top > srcRow.top ? 'DOWN' : 'UP'}: ` +
                                     `src=[${srcRow.left},${srcRow.right}] tgt=[${tgtRow.left},${tgtRow.right}] ` +
                                     `x=${sourceX}->${newX}`);
                             if (Math.abs(newX - x) > 1)
@@ -590,7 +590,7 @@ export default class MouseWarpExtension extends Extension {
                         // Snap both X and Y to actual target monitor
                         const snapped = this._snapToMonitors(rawX, warpY, targetMonitors);
                         if (this._debugLogging)
-                            log(`[mouse-warp] DEAD ZONE WARP: x=${x}->${snapped.x} y=${y}->${snapped.y}`);
+                            log(`[dj-mouse-warp] DEAD ZONE WARP: x=${x}->${snapped.x} y=${y}->${snapped.y}`);
                         this._warp(snapped.x, snapped.y);
                         this._pressureStartTime = 0;
                     }

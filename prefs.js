@@ -6,7 +6,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 export default class MouseWarpPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const page = new Adw.PreferencesPage();
-        const settings = this.getSettings('org.gnome.shell.extensions.mouse-warp');
+        const settings = this.getSettings('org.gnome.shell.extensions.dj-mouse-warp');
 
         // ── Warp Settings ──
         const warpGroup = new Adw.PreferencesGroup({

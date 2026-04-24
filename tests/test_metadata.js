@@ -101,7 +101,7 @@ assert(prefs.includes('fillPreferencesWindow'), 'Implements fillPreferencesWindo
 
 // Settings binding — checks that schema ID is correct
 assert(
-    prefs.includes("org.gnome.shell.extensions.mouse-warp"),
+    prefs.includes("org.gnome.shell.extensions.dj-mouse-warp"),
     'Uses correct GSettings schema ID'
 );
 
@@ -214,7 +214,7 @@ const requiredFiles = [
     'prefs.js',
     'Makefile',
     'README.md',
-    'schemas/org.gnome.shell.extensions.mouse-warp.gschema.xml',
+    'schemas/org.gnome.shell.extensions.dj-mouse-warp.gschema.xml',
 ];
 
 for (const f of requiredFiles) {

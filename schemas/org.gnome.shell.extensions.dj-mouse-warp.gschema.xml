@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.mouse-warp" path="/org/gnome/shell/extensions/mouse-warp/">
+  <schema id="org.gnome.shell.extensions.dj-mouse-warp" path="/org/gnome/shell/extensions/dj-mouse-warp/">
     <key name="edge-tolerance" type="i">
       <default>2</default>
       <summary>Edge Tolerance</summary>

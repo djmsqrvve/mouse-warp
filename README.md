@@ -1,4 +1,4 @@
-# Mouse Warp
+# DJ Mouse Warp
 
 A GNOME Shell extension that proportionally maps mouse cursor movement between monitors of different sizes. The Linux/Wayland answer to [LittleBigMouse](https://github.com/mgth/LittleBigMouse).
 
@@ -36,7 +36,7 @@ The result: moving the mouse straight up from the far-right of your desk monitor
 
 ```bash
 make install
-gnome-extensions enable mouse-warp@djmsqrvve
+gnome-extensions enable dj-mouse-warp@djmsqrvve
 ```
 
 Then log out and back in (Wayland requires a session restart).
@@ -112,7 +112,7 @@ Mouse Warp is tested against and designed for a wide range of monitor setups. Al
 
 ## Configuration
 
-Open preferences via `gnome-extensions prefs mouse-warp@djmsqrvve`.
+Open preferences via `gnome-extensions prefs dj-mouse-warp@djmsqrvve`.
 
 ### Warp Settings
 
@@ -165,7 +165,7 @@ Open preferences via `gnome-extensions prefs mouse-warp@djmsqrvve`.
 An interactive HTML tool shows the monitor layout, dead zones, warp mapping lines, and proportional formula.
 
 ```bash
-xdg-open mouse-warp/visualizer.html
+xdg-open dj-mouse-warp/visualizer.html
 ```
 
 ## Testing

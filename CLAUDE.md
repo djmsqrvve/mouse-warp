@@ -1,10 +1,10 @@
-# Mouse Warp
+# DJ Mouse Warp
 
 GNOME Shell extension for proportional cursor mapping between monitors of different sizes. The Linux answer to LittleBigMouse.
 
 ## Git Topology
 
-Standalone repo. Remote: `origin https://github.com/djmsqrvve/mouse-warp`
+Standalone repo. Remote: `origin https://github.com/djmsqrvve/dj-mouse-warp`
 
 ## Stack
 
@@ -16,7 +16,7 @@ JavaScript (GJS/GNOME Shell Extension API), GSettings, Clutter, St.
 make install                                  # Compile schemas + copy to extensions dir
 make test                                     # Run 537 assertions (Node.js)
 make package                                  # Create .zip for distribution
-gnome-extensions enable mouse-warp@djmsqrvve  # Enable (requires re-login on Wayland)
+gnome-extensions enable dj-mouse-warp@djmsqrvve  # Enable (requires re-login on Wayland)
 bash tests/run_tests.sh                       # Same as make test
 docker compose run tests                      # Run tests in container
 
@@ -84,7 +84,7 @@ Makefile           # install, uninstall, package, test, compile-schemas
 
 ## Configuration
 
-Settings via `gnome-extensions prefs mouse-warp@djmsqrvve` or GSettings:
+Settings via `gnome-extensions prefs dj-mouse-warp@djmsqrvve` or GSettings:
 
 Warp: `is-enabled`, `overlap-remap-enabled`, `warp-enabled`, `edge-tolerance` (2px), `pressure-threshold-ms` (150), `warp-cooldown-ms` (100)
 

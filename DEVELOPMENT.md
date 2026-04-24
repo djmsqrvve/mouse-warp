@@ -62,21 +62,21 @@ CI runs automatically on push/PR via GitHub Actions (`.github/workflows/test.yml
 ```bash
 make install
 # Log out / log in (Wayland requires session restart)
-gnome-extensions enable mouse-warp@djmsqrvve
+gnome-extensions enable dj-mouse-warp@djmsqrvve
 ```
 
 Check `journalctl -f -o cat /usr/bin/gnome-shell` for extension errors.
 
 To view extension logs with more detail:
 ```bash
-journalctl -f --grep="mouse-warp" _COMM=gnome-shell
+journalctl -f --grep="dj-mouse-warp" _COMM=gnome-shell
 ```
 
 ### Debug tips
 
 - Add `console.log(...)` calls in extension.js — they appear in the GNOME Shell journal
 - Use Looking Glass (`Alt+F2` → `lg`) to inspect `Main.layoutManager.monitors`
-- `gnome-extensions info mouse-warp@djmsqrvve` shows enabled/error state
+- `gnome-extensions info dj-mouse-warp@djmsqrvve` shows enabled/error state
 
 ## Known limitations / TODO
 

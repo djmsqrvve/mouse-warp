@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SCHEMA_PATH = path.resolve(__dirname, '..', 'schemas', 'org.gnome.shell.extensions.mouse-warp.gschema.xml');
+const SCHEMA_PATH = path.resolve(__dirname, '..', 'schemas', 'org.gnome.shell.extensions.dj-mouse-warp.gschema.xml');
 
 let passed = 0;
 let failed = 0;
@@ -47,11 +47,11 @@ assert(xml.includes('</schema>'), 'Has closing </schema>');
 console.log('\n── Schema Identity ──');
 
 assert(
-    xml.includes('id="org.gnome.shell.extensions.mouse-warp"'),
-    'Schema ID is "org.gnome.shell.extensions.mouse-warp"'
+    xml.includes('id="org.gnome.shell.extensions.dj-mouse-warp"'),
+    'Schema ID is "org.gnome.shell.extensions.dj-mouse-warp"'
 );
 assert(
-    xml.includes('path="/org/gnome/shell/extensions/mouse-warp/"'),
+    xml.includes('path="/org/gnome/shell/extensions/dj-mouse-warp/"'),
     'Schema path matches GNOME convention'
 );
 

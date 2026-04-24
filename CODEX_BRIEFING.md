@@ -1,4 +1,4 @@
-# Mouse Warp — Codex Agent Briefing
+# DJ Mouse Warp — Codex Agent Briefing
 
 You are picking up development on Mouse Warp, a GNOME Shell extension that proportionally maps cursor movement between monitors of different sizes. This briefing tells you everything you need to hit the ground running.
 
@@ -74,7 +74,7 @@ The extension is installable via `make install` but hasn't been submitted to the
 ### Running Tests
 
 ```bash
-cd ~/dev/mouse-warp
+cd ~/dev/gnome-extensions/dj-mouse-warp
 make test                    # 537 assertions, ~2 seconds
 docker compose run tests     # containerized, includes schema compilation
 ```
@@ -94,11 +94,11 @@ Tests are Node.js scripts with a custom assertion framework (no dependencies). T
 
 ```bash
 make install                                    # copies to ~/.local/share/gnome-shell/extensions/
-gnome-extensions enable mouse-warp@djmsqrvve    # enable
+gnome-extensions enable dj-mouse-warp@djmsqrvve    # enable
 # Log out and back in (Wayland requirement)
 
 # Check logs:
-journalctl -f /usr/bin/gnome-shell | grep mouse-warp
+journalctl -f /usr/bin/gnome-shell | grep dj-mouse-warp
 
 # Quick debug cycle:
 # 1. Enable debug-logging in prefs

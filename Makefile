@@ -1,4 +1,4 @@
-UUID = mouse-warp@djmsqrvve
+UUID = dj-mouse-warp@djmsqrvve
 INSTALL_DIR = $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SOURCES = extension.js metadata.json prefs.js schemas
 
